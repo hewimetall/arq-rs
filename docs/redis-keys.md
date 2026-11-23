@@ -65,7 +65,8 @@ q:{default}:uniq:item:1001
 | `time_limit_ms`, `min_backoff_ms`, `max_backoff_ms` | копия политики на момент enqueue или requeue |
 | `result` | `ok`, `skipped` или пусто |
 | `reason`, `error` | терминальная причина и усечённый текст |
-| `control_op` | пусто, `cancel` или `kill` |
+| `stop_evidence` | пусто, `observed_exit` или `lease_expired` |
+| `control_op` | пусто, `cancel` или `kill`; пусто после терминального перехода |
 | `control_operation_id`, `control_cycle_id`, `control_delivery_token`, `control_accepted_at_ms` | принятая команда |
 | `history` | JSON-массив терминальных записей прошлых циклов |
 
@@ -80,7 +81,8 @@ q:{default}:uniq:item:1001
   "retries": 2,
   "deliveries": 3,
   "finished_at_ms": 1763942400000,
-  "control_op": ""
+  "control_op": "",
+  "stop_evidence": ""
 }
 ```
 
@@ -138,4 +140,4 @@ Orphan — child-запись, у которой родительский superv
 
 ## Предел ready
 
-`enqueue` новой задачи читает `ZCARD` ключа ready под `WATCH`. При `ZCARD >= ARQ_MAX_READY` результат — `QueueFull`. Inflight и DLQ в это число не входят. Повтор операции, у которой receipt уже содержит успех или `duplicate`, лимит заново не применяет.
+`enqueue` новой задачи читает `ZCARD` всего ключа ready, включая члены с будущим score. Ключ при этом не ставится под `WATCH`. При наблюдаемом `ZCARD >= ARQ_MAX_READY` результат — `QueueFull`. Одновременные постановки могут ненадолго превысить предел; граница превышения задана в [operations.md](operations.md). Inflight и DLQ в это число не входят. Повтор операции, у которой receipt уже содержит успех или `duplicate`, лимит заново не применяет.

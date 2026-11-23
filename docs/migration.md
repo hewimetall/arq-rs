@@ -64,7 +64,7 @@ arq-rs фиксирует одно правило. `ok`, `skipped`, `retry` и `
 
 `QueueAdmin` привязан к одной очереди в конструкторе. `peek` принимает `ready`, `scheduled` и `inflight`. Добавлены `get`, `dead_for_tag` и `command`. `scheduled` — срез ready с будущим score, не отдельное состояние Redis.
 
-`QueueControl` — новый интерфейс. `cancel`, `kill` и `requeue` в simple-q в этой форме отсутствуют. Их протокол задан в [operations.md](operations.md), а не выводится из старого admin.
+`QueueControl` — новый интерфейс. `cancel`, `kill`, `requeue` и `settle` в simple-q в этой форме отсутствуют. Их протокол задан в [operations.md](operations.md), а не выводится из старого admin. `settle` закрывает inflight с принятой командой после истечения lease, когда процесс нельзя отождествить.
 
 Пагинация больше не обрезает `limit` молча до 200: значение вне `1…200` поднимает `ValueError`.
 

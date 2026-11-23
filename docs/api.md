@@ -273,7 +273,7 @@ class QueueAdmin:
 
 `peek` принимает `ready`, `scheduled` и `inflight`. `scheduled` — это ready-задачи с временем доступности в будущем, отдельным состоянием не является.
 
-`Snapshot` содержит `taken_at`, `queues`, `supervisors` и `orphans`. Счётчики очереди включают глубину `ready`, `scheduled`, `inflight`, `done` и `dead`. У supervisor есть `children`, у child есть `tasks`. Снимок сохраняет host, PID, slot, RSS, причину выхода и счётчики supervisor: recycled, drains, kills, restarts. `retries` и `deliveries` видны отдельно. Свежесть heartbeat не доказывает ни жизнь, ни выход процесса. Отсутствие записи в DLQ не доказывает, что исполнение ещё идёт.
+`Snapshot` содержит `taken_at`, `queues`, `supervisors` и `orphans`. Счётчики очереди включают глубину `ready`, `scheduled`, `inflight`, `done` и `dead`. `ready` и `scheduled` разбивают один ZSET и не пересекаются: `ready` — score не больше Redis `TIME` снимка, `scheduled` — score больше этого времени. Их сумма равна `ZCARD` и есть величина, которую ограничивает `ARQ_MAX_READY`. У supervisor есть `children`, у child есть `tasks`. Снимок сохраняет host, PID, slot, RSS, причину выхода и счётчики supervisor: recycled, drains, kills, restarts. `retries` и `deliveries` видны отдельно. Свежесть heartbeat не доказывает ни жизнь, ни выход процесса. Отсутствие записи в DLQ не доказывает, что исполнение ещё идёт.
 
 Чтение не пишет heartbeat, не продлевает lease и не чинит индексы. Снимок не атомарен относительно всех ключей сразу.
 
@@ -317,15 +317,22 @@ class QueueControl:
         *,
         operation_id: str | None = None,
     ) -> RequeueResult: ...
+
+    async def settle(
+        self,
+        task_id: str,
+        *,
+        operation_id: str | None = None,
+    ) -> CommandReceipt: ...
 ```
 
-Других публичных методов управления supervisor нет. Поведение команд — в [operations.md](operations.md). Receipt подтверждает принятие команды, а не завершение остановки.
+Других публичных методов управления supervisor нет. `settle` управляет записью задачи, а не процессом: сигнал он не посылает. Поведение команд — в [operations.md](operations.md). Receipt `cancel` и `kill` подтверждает принятие команды, а не завершение остановки. Receipt `settle` со статусом `accepted` подтверждает уже записанный переход в DLQ.
 
 ```python
 class CommandReceipt:
     operation_id: str
     task_id: str
-    status: str  # accepted | already_terminal | not_found
+    status: str  # accepted | already_terminal | not_found | still_owned | not_blocked
     cycle_id: str | None
 
 
@@ -365,11 +372,11 @@ class RequeueResult:
 | `ARQ_MISSED_HEARTBEATS` | 4 | окно свежести для admin |
 | `ARQ_MAINTENANCE_INTERVAL_MS` | 60000 | период удаления terminal-записей |
 | `ARQ_MAINTENANCE_BATCH` | 100 | размер одного batch удаления |
-| `ARQ_WATCH_RETRIES` | 8 | повторы конфликта `WATCH` на одну попытку операции |
+| `ARQ_WATCH_RETRIES` | 8 | повторы конфликта `WATCH` одной задачи, не чужих обновлений общего индекса |
 | `ARQ_DONE_TTL_SECS` | 86400 | retention `done` |
 | `ARQ_DEAD_TTL_SECS` | 604800 | retention `dead` |
 | `ARQ_RECEIPT_TTL_SECS` | 691200 | retention receipt |
-| `ARQ_MAX_READY` | 100000 | предел всего ready, включая отложенные |
+| `ARQ_MAX_READY` | 100000 | мягкий предел `ZCARD` всего ready, включая отложенные |
 | `ARQ_MAX_MESSAGE_BYTES` | 1048576 | UTF-8 JSON `kwargs` |
 | `ARQ_MAX_HEADERS_BYTES` | 65536 | сумма байт ключей и значений headers |
 | `ARQ_MAX_ERROR_BYTES` | 4096 | сохраняемый текст ошибки |

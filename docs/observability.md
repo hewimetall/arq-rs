@@ -27,7 +27,7 @@
 
 | Имя | Labels | Смысл |
 |---|---|---|
-| `arq_queue_depth` | `queue_name`, `state` | `ready`, `scheduled`, `inflight`, `done`, `dead` |
+| `arq_queue_depth` | `queue_name`, `state` | `ready`, `scheduled`, `inflight`, `done`, `dead`; `ready` и `scheduled` не пересекаются |
 | `arq_enqueue_duplicates_total` | `queue_name` | ответ `duplicate` |
 | `arq_redis_errors_total` | `queue_name`, `op` | ошибка команды или соединения |
 | `arq_redis_latency_milliseconds` | `queue_name`, `op` | длительность цикла операции |
@@ -39,9 +39,11 @@
 | `arq_child_recycle_total` | `queue_name` | exit 0 |
 | `arq_child_restart_total` | `queue_name` | перезапуск после ненулевого кода, кроме конфигурации |
 | `arq_child_kill_total` | `queue_name` | `SIGKILL`, который послал этот supervisor |
-| `arq_control_commands_total` | `queue_name`, `op`, `status` | `cancel`, `kill`, `requeue` и статус ответа |
+| `arq_control_commands_total` | `queue_name`, `op`, `status` | `cancel`, `kill`, `requeue`, `settle` и статус ответа |
 | `arq_operations_indeterminate_total` | `queue_name`, `op` | `IndeterminateOperation` |
 | `arq_storage_inconsistent` | `queue_name` | gauge 1, пока процесс остановил изменения очереди |
+
+`arq_queue_depth{state="ready"}` считает члены `q:{queue}:ready` со score не выше Redis `TIME` на момент снятия. `state="scheduled"` считает остальные члены того же ZSET. Ряды не пересекаются и в сумме дают `ZCARD`. `ARQ_MAX_READY` сравнивается с этой суммой, а не с одним рядом `ready`. Задача переходит из `scheduled` в `ready` с ходом времени, без записи в Redis. `inflight`, `done` и `dead` читаются из своих ключей и в эту сумму не входят.
 
 `slot` в RSS — номер слота supervisor, не идентификатор задачи. После смерти child gauge RSS этого слота снимается, а `dramatiq_messages_inprogress` уменьшается снятием multiprocess-файла слота. Завышенный gauge после смерти child тестом запрещён.
 
