@@ -18,7 +18,7 @@ Redis-очередь для Python async-обработчиков. Rust выпо
 
 | Документ | Содержание |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Процессы, границы Rust и Python, manifest переноса |
+| [docs/architecture.md](docs/architecture.md) | Процессы, пять крейтов, границы Rust и Python, manifest переноса |
 | [docs/api.md](docs/api.md) | `App`, `Client`, middleware, admin, control, конфигурация |
 | [docs/redis-keys.md](docs/redis-keys.md) | Ключи, поля задачи, receipt, retention |
 | [docs/operations.md](docs/operations.md) | Транзакции, исходы, retry, DLQ, cancel/kill, shutdown |

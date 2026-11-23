@@ -45,7 +45,21 @@ QueueControl → cancel / kill / requeue / settle
 - Отдельный recovery-sweeper не запускается. Чтение состояния данные не исправляет.
 - Signal handler процесса, который перезапускает child, устанавливается до инициализации Python в этом процессе. Родительский supervisor CPython не инициализирует и вооружает `SIGTERM` и `SIGINT` до запуска слотов. Child инициализирует интерпретатор с `install_signal_handlers = 0`.
 
-Подробности транспорта — в [operations.md](operations.md), ключей — в [redis-keys.md](redis-keys.md).
+Подробности транспорта — в [operations.md](operations.md), ключей — в [redis-keys.md](redis-keys.md), состава крейтов — в [ADR 0008](adr/0008-sans-io-and-crates.md).
+
+## Крейты
+
+Workspace плоский: `crates/<имя>`, виртуальный корневой `Cargo.toml`, общие версии в `[workspace.dependencies]`. Протокол и стейт-машины не открывают сеть, `tokio` и `pyo3`. Адаптер передаёт им время и случайность аргументами и сам выполняет команды.
+
+| Крейт | Содержимое | Зависит от |
+|---|---|---|
+| `arq-core` | Идентификаторы, `Config` (`ARQ_*`), разбор `OutcomeProposal`, ошибки, `AttemptLifecycle`, `AdmissionGate`, `SlotLifecycle`, `PingWatch`, план операций и проверка постусловий | ничего из IO |
+| `arq-redis` | `RedisBackend`: цикл `WATCH / MULTI / EXEC`, receipt, maintenance batch, `QueueAdmin`, `QueueControl`, реестр supervisor | `arq-core`, `redis`, `tokio` |
+| `arq-pybridge` | PyO3: child-интерпретатор, `App.dispatch`, `note_dead`, loop ping, классы `Client`, `QueueAdmin`, `QueueControl` | `arq-core`, `arq-redis`, `pyo3` |
+| `arq-supervisor` | Родитель без CPython: слоты, `watchexec-supervisor`, сигналы, память и RSS, backoff, metrics helper | `arq-core`, `arq-redis`, `watchexec-supervisor` |
+| `arq-worker` | Бинарник и CLI (`--app`, `--factory`). Единственная точка, которая собирает все четыре крейта | все четыре |
+
+`arq-core` не зависит от `tokio`, `redis`, `pyo3` и файловой системы. `arq-supervisor` не зависит от `arq-pybridge` ни прямо, ни транзитивно. Публичный импорт Python остаётся `arq_rs`; расширение собирает `arq-pybridge`. Новый крейт добавляется только новым ADR.
 
 ## Поток одной доставки
 
@@ -66,28 +80,27 @@ SHA зафиксирован: `483e9fc063103708bdf37bfe80ddbc91af2a2fd5`.
 
 | Компонент | Символ донора | Кто вызывает у донора | Куда входит в arq-rs | Тесты донора | Новый тест | Статус у донора |
 |---|---|---|---|---|---|---|
-| Запуск слота | `agent-worker` `process_port::spawn_worker` | `supervisor::run` | цикл слотов supervisor | `supervisor_tests`, `process_compare` | замена child по slot | production |
-| watchexec-supervisor 6.0.0 | `watchexec_supervisor::job::start_job` | `spawn_worker` | тот же spawn | `crates/supervisor/tests/process_compare.rs` | SIGUSR1, группа процессов, exit status | production spawn; crate `simple-q-process` сам по себе job не стартует |
-| Метрики-процесс | `supervisor::spawn_metrics` | `supervisor::run` | отдельный `tokio::process`, не слот watchexec | тесты supervisor roster | scrape после смерти child | production, отдельный механизм |
-| Родитель без CPython | `main` ветка supervisor, `arm_stop_signals` | `main` до `supervisor::run` | тот же порядок | `supervisor_tests` | сигнал до `Py_Initialize` | production |
-| Child interpreter | `runtime::initialize`, `PyConfig.install_signal_handlers = 0` | `child::run_child` | child | тесты child | venv и отсутствие обработчиков CPython | production |
-| Загрузка App | `bridge::start` | `child::run_child` | `--app module:app` и `--app module:create_app --factory` | тесты запуска worker | factory выполняется внутри child | production |
-| Dispatch и middleware | `simple_q.dispatch.App` | `bridge::execute` → `dispatch` | Python-пакет `arq_rs` | `python/tests/test_middleware_stack.py` | порядок hooks в реальном child | production |
+| Запуск слота | `agent-worker` `process_port::spawn_worker` | `supervisor::run` | цикл слотов `arq-supervisor` | `supervisor_tests`, `process_compare` | замена child по slot | production |
+| watchexec-supervisor 6.0.0 | `watchexec_supervisor::job::start_job` | `spawn_worker` | spawn в `arq-supervisor` | `crates/supervisor/tests/process_compare.rs` | SIGUSR1, группа процессов, exit status | production spawn; crate `simple-q-process` сам по себе job не стартует |
+| Метрики-процесс | `supervisor::spawn_metrics` | `supervisor::run` | `arq-supervisor`, отдельный `tokio::process` | тесты supervisor roster | scrape после смерти child | production, отдельный механизм |
+| Родитель без CPython | `main` ветка supervisor, `arm_stop_signals` | `main` до `supervisor::run` | `arq-supervisor` до слотов | `supervisor_tests` | сигнал до `Py_Initialize` | production |
+| Child interpreter | `runtime::initialize`, `PyConfig.install_signal_handlers = 0` | `child::run_child` | `arq-pybridge` | тесты child | venv и отсутствие обработчиков CPython | production |
+| Загрузка App | `bridge::start` | `child::run_child` | CLI `arq-worker`, вызов в `arq-pybridge` | тесты запуска worker | factory выполняется внутри child | production |
+| Dispatch и middleware | `simple_q.dispatch.App` | `bridge::execute` → `dispatch` | пакет `arq_rs`, вызов из `arq-pybridge` | `python/tests/test_middleware_stack.py` | порядок hooks в реальном child | production |
 | Контекст сообщения | `message.bind_message` / `reset_message` | `App.dispatch` | тот же `try/finally` | `test_middleware_stack` | очистка после ошибки и soft cancel | production |
-| Outcome parser | `simple_q_python_bridge::parse_outcome`, `finish_for` | `worker` после `dispatch` | finish path child | тесты `python-bridge` | неизвестный outcome и исключение dispatch | production; семантику неизвестного outcome задаёт ADR 0003, а не ветка missing-key донора |
-| Loop ping | `bridge::ping`, `ping::PingWatch::observe` | `child::lifecycle` | единственный ping path | `ping_tests` | зависший loop и обычный `asyncio.sleep` | production |
-| Graceful drain | `request_graceful_drain`, pidfd родителя, `SIGUSR1` | `child::lifecycle` | shutdown policy | `parent_exit_queue` | shutdown с активной доставкой | production |
-| Память и recycle | `plan_memory_signals`, `slot_busy`, `max_tasks_per_process` | цикл supervisor и child | те же пороги | `supervisor_tests` | soft signal не бьёт busy child; exit 0 заменяет слот | production |
-| Интроспекция | `simple_q_runtime::admin` записи child и supervisor | heartbeat supervisor | `QueueAdmin.snapshot` | `admin` tests | gauges после смерти child | production как источник полей; ключи заменяются схемой arq-rs |
-| Attempt lifecycle | `simple_q_orchestration::AttemptLifecycle` | `worker::held_finish` собирает значение в момент finish | живой объект одной доставки в child | unit-тесты `attempt.rs` | потеря владения во время handler | вне живого цикла: донор конструирует его локально при finish |
-| Drain gate | `AdmissionGate` | вызовов из `agent-worker` нет | вход claim | unit-тесты `drain.rs` | drain не делает claim | вне production-пути |
-| Slot lifecycle | `simple_q_process::SlotLifecycle` | вызовов из `supervisor.rs` нет | владелец переходов слота | unit-тесты `lifecycle.rs` | supervisor проводит Ready/Drain/Reaped | вне production-пути |
-| Queue port | `simple_q_backend::QueuePort` | реализации в `agent-worker` нет | не переносится | типы порта | тесты `RedisBackend` по [operations.md](operations.md) | исключён; транспорт — `RedisBackend` |
+| Outcome parser | `simple_q_python_bridge::parse_outcome`, `finish_for` | `worker` после `dispatch` | разбор `OutcomeProposal` в `arq-core` | тесты `python-bridge` | неизвестный outcome и исключение dispatch | production; семантику неизвестного outcome задаёт ADR 0003, а не ветка missing-key донора |
+| Loop ping | `bridge::ping`, `ping::PingWatch::observe` | `child::lifecycle` | `PingWatch` в `arq-core`, вызов из `arq-pybridge` | `ping_tests` | зависший loop и обычный `asyncio.sleep` | production |
+| Graceful drain | `request_graceful_drain`, pidfd родителя, `SIGUSR1` | `child::lifecycle` | `arq-supervisor` и child | `parent_exit_queue` | shutdown с активной доставкой | production |
+| Память и recycle | `plan_memory_signals`, `slot_busy`, `max_tasks_per_process` | цикл supervisor и child | `arq-supervisor` | `supervisor_tests` | soft signal не бьёт busy child; exit 0 заменяет слот | production |
+| Интроспекция | `simple_q_runtime::admin` записи child и supervisor | heartbeat supervisor | `QueueAdmin` в `arq-redis` | `admin` tests | gauges после смерти child | production как источник полей; ключи заменяются схемой arq-rs |
+| Attempt lifecycle | `simple_q_orchestration::AttemptLifecycle` | `worker::held_finish` собирает значение в момент finish | `arq-core`; вызывает child | unit-тесты `attempt.rs` | потеря владения во время handler | вне живого цикла: донор конструирует его локально при finish |
+| Drain gate | `AdmissionGate` | вызовов из `agent-worker` нет | `arq-core`; вход claim | unit-тесты `drain.rs` | drain не делает claim | вне production-пути |
+| Slot lifecycle | `simple_q_process::SlotLifecycle` | вызовов из `supervisor.rs` нет | `arq-core`; вызывает `arq-supervisor` | unit-тесты `lifecycle.rs` | supervisor проводит Ready/Drain/Reaped | вне production-пути |
 | Старый транспорт | `simple_q_runtime::redis_api`, Apalis-ключи | worker донора | не переносится | `enqueue.rs` | новый протокол вместо этих тестов | production донора, исключён |
 | Sweeper донора | `cleanup::sweep_queue` | интервал в `child::run_child` | не переносится; retention делает maintenance batch | `cleanup_tests` | retention terminal-записей | production донора, исключён как recovery |
 | Business lock | `lock`, `acquire_lock` | dispatch и ping донора | не переносится | lock-тесты | `actor(lock_key=...)` даёт `TypeError` | production донора, исключён |
 
-`RedisBackend` напрямую выполняет `enqueue`, `claim`, `renew`, `finish`, `requeue` и `control`. `control` включает `cancel`, `kill` и `settle`. Maintenance batch и чтение `QueueAdmin` тоже входят в `RedisBackend`. Отдельного `QueuePort` в arq-rs нет.
+`RedisBackend` в `arq-redis` напрямую выполняет `enqueue`, `claim`, `renew`, `finish`, `requeue` и `control`. `control` включает `cancel`, `kill` и `settle`. Maintenance batch и чтение `QueueAdmin` тоже входят в `RedisBackend`. Типа-прослойки и `QueuePort` нет. Трейт для хранилища появится только вместе со второй реализацией и новым ADR.
 
 Python-модули, которые стоят на пути child и переносятся с адаптацией имён пакета: `dispatch.py`, `interfaces.py`, `message.py`, `backoff.py`, `metrics.py`, `tracing.py`, `tracking.py`, `exposition.py`, `multiproc.py`. `memory.py` остаётся только внутренней тестовой двойной и не экспортируется. `admin.py` переписывается под ключи и методы этого контракта; поля snapshot, которые донор уже показывает, сохраняются.
 

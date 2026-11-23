@@ -72,10 +72,10 @@ arq-rs фиксирует одно правило. `ok`, `skipped`, `retry` и `
 
 Scores и поля времени — Unix-миллисекунды от Redis `TIME`. Донор в ряде ключей хранил секунды.
 
-Транспорт донора на этом SHA не является `WATCH / MULTI / EXEC` протоколом arq-rs. Перенос runtime не включает `redis_api` и `QueuePort`. Очередь пишет `RedisBackend` по [operations.md](operations.md): `enqueue`, `claim`, `renew`, `finish`, `requeue`, `control`, maintenance batch и чтение для `QueueAdmin`.
+Транспорт донора на этом SHA не является `WATCH / MULTI / EXEC` протоколом arq-rs. Перенос runtime не включает `redis_api` и `QueuePort`. Очередь пишет `RedisBackend` в крейте `arq-redis` по [operations.md](operations.md): `enqueue`, `claim`, `renew`, `finish`, `requeue`, `control`, maintenance batch и чтение для `QueueAdmin`.
 
 Частичный `EXEC` останавливает изменения очереди в процессе. Донор такой остановки не описывает.
 
 ## Runtime, который ещё надо подключить
 
-`SlotLifecycle` и `AdmissionGate` на SHA донора supervisor loop не вызывает. `AttemptLifecycle` у донора собирается локально в момент finish. В arq-rs это живое состояние одной доставки child. Наличие этих типов в дереве simple-q не означает, что arq-rs уже получил рабочий slot machine, drain gate или цикл доставки. Строки manifest в [architecture.md](architecture.md) закрываются только новым интеграционным тестом.
+`SlotLifecycle` и `AdmissionGate` на SHA донора supervisor loop не вызывает. `AttemptLifecycle` у донора собирается локально в момент finish. В arq-rs все три типа живут в `arq-core`. Они считаются перенесёнными, только когда их вызывает цикл `arq-supervisor` или child и это покрыто интеграционным тестом. Наличие этих типов в дереве simple-q само по себе runtime не переносит. Строки manifest в [architecture.md](architecture.md) закрываются только этим тестом.

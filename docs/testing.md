@@ -4,6 +4,8 @@
 
 Тесты гоняются против Redis 8.6.2. Отдельная группа поднимает Redis Cluster и рвёт соединение на redirect. Python hooks, которые контракт относит к child, выполняются в реальном child-процессе, а не только вызовом `dispatch` в том же интерпретаторе.
 
+Тесты `arq-core` не открывают Redis и не инициализируют Python. Тесты `arq-redis` не импортируют Python. `cargo tree -p arq-supervisor` не содержит `arq-pybridge` и `pyo3`.
+
 ## Протокол Redis
 
 - Два параллельных `enqueue` с одним `unique_key` создают одну задачу. Второй ответ — `duplicate`. Ошибка Redis этим ответом не подменяется.
