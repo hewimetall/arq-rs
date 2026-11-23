@@ -31,7 +31,7 @@ Workspace плоский: `crates/<имя>`, виртуальный корнев
 - `arq-core` не зависит от `tokio`, `redis`, `pyo3` и файловой системы. Время и случайность приходят аргументами.
 - `arq-supervisor` не зависит от `arq-pybridge` ни прямо, ни транзитивно. Проверка: `cargo tree -p arq-supervisor -i pyo3` возвращает пустой результат.
 - `QueuePort` не переносится. `RedisBackend` — конкретный тип без трейта-прослойки. Трейт вводится только при появлении второй реализации и отдельном ADR.
-- `AttemptLifecycle`, `AdmissionGate` и `SlotLifecycle` живут в `arq-core`. `arq-supervisor` вызывает `SlotLifecycle` и `AdmissionGate`. Цикл child и supervisor машину `AttemptLifecycle` не проводят. Строка manifest закрывается, только когда вызов есть и его покрывает интеграционный тест (ADR 0001).
+- `AttemptLifecycle`, `AdmissionGate` и `SlotLifecycle` живут в `arq-core`. `supervise_slot` проводит `SlotLifecycle`. У `AdmissionGate` в `arq-supervisor` два экземпляра. Сессия child в `child.rs` держит локальный экземпляр: `parent_or_signal_drain` закрывает его при выходе родителя и при `SIGUSR1`, перед claim `blocks_claim` проверяет его же. `close_admission` закрывает поле `shared.gate`, другой экземпляр. Закрытие ворот родителя само по себе claim child не останавливает. Цикл child и supervisor машину `AttemptLifecycle` не проводят. Строка manifest закрывается, только когда вызов есть и его покрывает интеграционный тест (ADR 0001).
 - Новые крейты добавляются только по новому ADR. Внутри крейта деление идёт модулями.
 
 ### Дистрибуция
