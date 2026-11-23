@@ -10,8 +10,6 @@ Redis-очередь для Python async-обработчиков. Rust выпо
 
 ## Не закрыто
 
-`AttemptLifecycle` реализован и покрыт unit-тестами в `arq-core`: тип в `crates/arq-core/src/attempt.rs`, тесты в `crates/arq-core/tests/machines.rs`. Цикл child и `arq-supervisor` событий ему не посылают. Строка manifest остаётся открытой, пока цикл child или supervisor не проведёт эту машину и интеграционный тест не покроет этот вызов (ADR 0001, ADR 0008).
-
 Ряды `arq_*` из [docs/observability.md](docs/observability.md) крейты Rust не выпускают. `python/arq_rs/metrics.py` записывает имена `dramatiq_*`. Сведение `arq_*` в тот же multiprocess-экспорт — отдельный ADR. Имена и labels в `docs/observability.md` до этого ADR не меняются.
 
 `Json::parse` отвергает документ глубже 64 значений и возвращает сообщение `nesting too deep`. Предел — `MAX_JSON_DEPTH` в `crates/arq-core`. Значение верхнего уровня считается за одно. Тот же предел записан рядом с `ARQ_MAX_MESSAGE_BYTES` в [docs/api.md](docs/api.md). Глубина от байтового потолка не зависит.

@@ -16,6 +16,10 @@ mod delivery;
 mod parent;
 
 pub use child::run_child;
+#[doc(hidden)]
+pub use delivery::{
+    fail_next_finish_transports, production_begin_finish_count, production_finish_terminal,
+};
 pub use cli::{
     execute, package_version, prepare, redis_endpoint_label, usage, version_line, Action,
     ChildPlan, ParentPlan,

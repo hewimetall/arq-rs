@@ -35,6 +35,7 @@
 - `QueuePort` не переносится. Транспорт — конкретный `RedisBackend` с операциями `enqueue`, `claim`, `renew`, `finish`, `requeue`, `cancel`, `kill` и `settle`.
 - Имена ключей очереди собирает `QueueKeys` в `arq-core`. `RedisBackend` пишет `ready`, `inflight`, `done`, `dead`, `dead:tag`, `job`, `uniq` и `receipt`. Реестр `arq:supervisors`, hash supervisor и hash child пишет `arq-supervisor`.
 - `supervise_slot` в `arq-supervisor` проводит `SlotLifecycle` событиями `ProcessEvent` Ready, Drain, Stop, Reaped, Crash и StartFailed.
+- Production-цикл `crates/arq-worker/src/delivery.rs` проводит `AttemptLifecycle`. `BeginFinish` отправляется один раз на логическую фиксацию. Временная ошибка finish не становится `FinishUnconfirmed`. Ошибка перехода останавливает попытку без синтезированного успеха.
 - Сессия child в `arq-supervisor` держит локальный `AdmissionGate`: `parent_or_signal_drain` закрывает его при выходе родителя и при `SIGUSR1`, перед claim `blocks_claim` проверяет этот же экземпляр. `close_admission` закрывает другой экземпляр в поле `shared.gate`. Закрытие ворот родителя само по себе claim child не останавливает.
 - Пакет `python/arq_rs` содержит поверхность очереди. Имена `dramatiq_*` записывает `python/arq_rs/metrics.py`.
 - `Json::parse` отвергает вложенность глубже `MAX_JSON_DEPTH` = 64 и возвращает `nesting too deep`. Глубина от `ARQ_MAX_MESSAGE_BYTES` не зависит.
@@ -44,5 +45,4 @@ ADR 0008 принят 2026-11-23. Раздел крейтов и отказ от
 
 Открыто:
 
-- `AttemptLifecycle` реализован и покрыт unit-тестами в `arq-core`. Цикл child и `arq-supervisor` событий ему не посылают. Строка manifest остаётся открытой до этого вызова и интеграционного теста (ADR 0001, ADR 0008).
 - Ряды `arq_*` из `docs/observability.md` крейты Rust не выпускают. Общий multiprocess-экспорт с метриками Python задаёт отдельный ADR. Имена и labels контракта не меняются.
