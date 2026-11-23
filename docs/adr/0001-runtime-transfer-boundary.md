@@ -12,7 +12,9 @@ PR №42 `hewimetall/simple-redis-q` на SHA `483e9fc063103708bdf37bfe80ddbc91a
 
 Перенос копирует только компоненты с указанным вызывающим путём. Для каждого компонента manifest в `docs/architecture.md` называет исходный символ, вызывающий путь донора, точку подключения arq-rs и тесты.
 
-`SlotLifecycle`, `AdmissionGate` и `QueuePort` подключаются в arq-rs отдельной интеграцией. До неё они не описываются как готовый runtime. Старый Redis-адаптер донора заменяется протоколом этого контракта и не переносится как транспорт.
+`SlotLifecycle` и `AdmissionGate` подключаются в arq-rs отдельной интеграцией. До неё они не описываются как готовый runtime.
+
+`QueuePort` не переносится. Транспорт реализуется напрямую через `RedisBackend`, без второй реализации и без порта. `RedisBackend` выполняет `enqueue`, `claim`, `renew`, `finish`, `requeue` и `control` из `docs/operations.md`. `control` включает `cancel`, `kill` и `settle`. Ему же принадлежат maintenance batch и чтение для `QueueAdmin`. Старый `redis_api` донора тоже не переносится.
 
 ## Последствия
 

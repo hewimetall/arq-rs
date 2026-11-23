@@ -28,3 +28,5 @@
 - выселение ключей без TTL, потерянный AOF и наложение исполнений описаны как границы гарантии;
 - пропущенный heartbeat не снимает uniq, а `cancel` и `kill` не зависят от pubsub;
 - handler не стартует по потерянному ответу claim и не стартует, если lease уже истёк к повторному `TIME`.
+
+`QueuePort` не переносится. Транспорт — `RedisBackend` с операциями `enqueue`, `claim`, `renew`, `finish`, `requeue` и `control`. Отдельно подключать ещё нужно только `SlotLifecycle`, `AdmissionGate` и `AttemptLifecycle`.

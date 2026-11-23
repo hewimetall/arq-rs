@@ -13,7 +13,7 @@ Producer
     ↓
 Python Client
     ↓
-Rust Redis-backend
+RedisBackend
     ↓
 Python child / asyncio
     ↓
@@ -26,7 +26,7 @@ Rust supervisor
     └── остановка child
 
 QueueAdmin   → чтение одной очереди
-QueueControl → cancel / kill / requeue
+QueueControl → cancel / kill / requeue / settle
 ```
 
 Библиотека предоставляет постановку, отложенное выполнение, дедупликацию активной задачи, lease и renew, повторную выдачу, прикладной retry, DLQ, чтение состояния и управляющие команды.
@@ -82,10 +82,12 @@ SHA зафиксирован: `483e9fc063103708bdf37bfe80ddbc91af2a2fd5`.
 | Attempt lifecycle | `simple_q_orchestration::AttemptLifecycle` | `worker::held_finish` собирает значение в момент finish | живой объект одной доставки в child | unit-тесты `attempt.rs` | потеря владения во время handler | вне живого цикла: донор конструирует его локально при finish |
 | Drain gate | `AdmissionGate` | вызовов из `agent-worker` нет | вход claim | unit-тесты `drain.rs` | drain не делает claim | вне production-пути |
 | Slot lifecycle | `simple_q_process::SlotLifecycle` | вызовов из `supervisor.rs` нет | владелец переходов слота | unit-тесты `lifecycle.rs` | supervisor проводит Ready/Drain/Reaped | вне production-пути |
-| Queue port | `simple_q_backend::QueuePort` | реализации в `agent-worker` нет | Redis backend этого контракта | типы порта | тесты `WATCH`-операций | порт без production-адаптера |
+| Queue port | `simple_q_backend::QueuePort` | реализации в `agent-worker` нет | не переносится | типы порта | тесты `RedisBackend` по [operations.md](operations.md) | исключён; транспорт — `RedisBackend` |
 | Старый транспорт | `simple_q_runtime::redis_api`, Apalis-ключи | worker донора | не переносится | `enqueue.rs` | новый протокол вместо этих тестов | production донора, исключён |
 | Sweeper донора | `cleanup::sweep_queue` | интервал в `child::run_child` | не переносится; retention делает maintenance batch | `cleanup_tests` | retention terminal-записей | production донора, исключён как recovery |
 | Business lock | `lock`, `acquire_lock` | dispatch и ping донора | не переносится | lock-тесты | `actor(lock_key=...)` даёт `TypeError` | production донора, исключён |
+
+`RedisBackend` напрямую выполняет `enqueue`, `claim`, `renew`, `finish`, `requeue` и `control`. `control` включает `cancel`, `kill` и `settle`. Maintenance batch и чтение `QueueAdmin` тоже входят в `RedisBackend`. Отдельного `QueuePort` в arq-rs нет.
 
 Python-модули, которые стоят на пути child и переносятся с адаптацией имён пакета: `dispatch.py`, `interfaces.py`, `message.py`, `backoff.py`, `metrics.py`, `tracing.py`, `tracking.py`, `exposition.py`, `multiproc.py`. `memory.py` остаётся только внутренней тестовой двойной и не экспортируется. `admin.py` переписывается под ключи и методы этого контракта; поля snapshot, которые донор уже показывает, сохраняются.
 
