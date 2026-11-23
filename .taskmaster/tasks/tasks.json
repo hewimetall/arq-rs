@@ -59,14 +59,15 @@
         "id": "5",
         "title": "Implement the CPython-free arq-supervisor",
         "description": "Implement the parent supervisor: slots, signals, memory limits, backoff, and metrics, with no dependency on arq-pybridge.",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
         "dependencies": [
           "4"
         ],
         "details": "This task is sequenced after arq-pybridge so the child contract exists before the process loop is wired. The crate graph is not that sequence. arq-supervisor depends on arq-core, arq-redis, and watchexec-supervisor only. It must not depend on arq-pybridge directly or transitively, and cargo tree -p arq-supervisor -i pyo3 must be empty. The parent never initializes CPython. It arms SIGTERM and SIGINT before starting slots. Without pidfd_open the supervisor exits 3 and does not start slots. SIGTERM before slots removes the supervisor hash and its member in arq:supervisors, then exits. Child exit codes match docs/architecture.md: 0 replaces the slot immediately and resets backoff to 1s; 2 restarts with backoff and leaves inflight for lease recovery, with no Python on_stop and no finish; 3 stops the supervisor and does not restart the slot; 4 restarts with backoff and does not blindly repeat finish; 5 restarts with backoff. A connection error still inside the WATCH retry limit is not code 5. Backoff starts at 1s and doubles up to 30s, and it must not become a tight respawn loop. A short Redis outage uses that backoff. Shutdown with an active delivery keeps renewing, commits an outcome that finished in time, and calls on_stop. Shutdown timeout does not write an ACK. The supervisor stops new claims on that child before drain. A missed registry heartbeat does not clear uniq and does not return the task to ready. Heartbeat does not extend the lease. Memory and RSS use the cgroup ratios and optional child RSS byte thresholds from Config. Soft memory drains; hard memory kills. A soft signal must not hit a busy child. Exit 0 replaces the slot. Metrics are a separate tokio process, and the admin view after child death shows the exit code and does not leave an inflated in-progress gauge. SlotLifecycle and AdmissionGate in arq-core are called from this loop and covered by an integration test before their manifest rows are closed. One child runs one task at a time.",
         "testStrategy": "cargo tree -p arq-supervisor -i pyo3 prints nothing. Process tests cover exit codes 0, 2, 3, 4, and 5, SIGTERM before slots, backoff from 1s to 30s, shutdown with an active delivery, and a missed heartbeat that leaves uniq in place. Tests do not import Python into the parent. Manifest rows for SlotLifecycle and AdmissionGate stay open until this loop calls them under an integration test.",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-23T12:40:14.173Z"
       },
       {
         "id": "6",
@@ -97,9 +98,9 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-23T11:51:41.843Z",
+      "lastModified": "2026-11-23T12:40:14.173Z",
       "taskCount": 7,
-      "completedCount": 4,
+      "completedCount": 5,
       "tags": [
         "master"
       ]

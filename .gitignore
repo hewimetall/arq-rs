@@ -34,3 +34,6 @@ dist/
 .venv/
 __pycache__/
 *.pyc
+.coverage
+htmlcov/
+python/arq_rs/*.so

@@ -11,3 +11,5 @@ description = "CPython-free parent supervisor for arq-rs."
 arq-core = { workspace = true }
 arq-redis = { workspace = true }
 watchexec-supervisor = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "process", "signal", "time", "sync", "io-util", "net", "fs"] }
+libc = "0.2"
