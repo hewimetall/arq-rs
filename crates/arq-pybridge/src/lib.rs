@@ -15,7 +15,7 @@ mod service;
 
 pub use child::{
     add_python_path, arm_restart_signals, configured_signal_handlers, dispatch_json, init_child_interpreter,
-    invoke_note_dead, load_application, ping_running_loop, record_outcome, run_child_script, saw_int, saw_term,
+    invoke_note_dead, load_application, ping_running_loop, record_outcome, run_child_script, saw_drain, saw_int, saw_term,
     spawn_event_loop, stop_event_loop, ArmedSignals, InitError, RunningLoop,
 };
 pub use decide::{

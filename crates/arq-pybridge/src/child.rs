@@ -16,6 +16,7 @@ use crate::ping::ping_loop;
 
 static TERM: AtomicBool = AtomicBool::new(false);
 static INT: AtomicBool = AtomicBool::new(false);
+static DRAIN: AtomicBool = AtomicBool::new(false);
 static SIGNAL_HANDLERS: AtomicI32 = AtomicI32::new(-1);
 
 enum InitState {
@@ -33,19 +34,43 @@ extern "C" fn on_signal(sig: i32) {
         TERM.store(true, Ordering::SeqCst);
     } else if sig == libc::SIGINT {
         INT.store(true, Ordering::SeqCst);
+    } else if sig == libc::SIGUSR1 {
+        DRAIN.store(true, Ordering::SeqCst);
     }
 }
 
 pub struct ArmedSignals {
     term: libc::sigaction,
     int_signal: libc::sigaction,
+    usr1: libc::sigaction,
 }
 
 /// Install the process handlers that restart or drain a child. This does not initialize Python.
+///
+/// `SIGUSR1` is drain, the same gate as parent exit. Its default action is terminate, so the
+/// supervisor's drain signal must be caught before Python starts.
 pub fn arm_restart_signals() -> std::io::Result<ArmedSignals> {
     let term = install(libc::SIGTERM)?;
-    let int_signal = install(libc::SIGINT)?;
-    Ok(ArmedSignals { term, int_signal })
+    let int_signal = match install(libc::SIGINT) {
+        Ok(action) => action,
+        Err(error) => {
+            unsafe {
+                libc::sigaction(libc::SIGTERM, &term, std::ptr::null_mut());
+            }
+            return Err(error);
+        }
+    };
+    let usr1 = match install(libc::SIGUSR1) {
+        Ok(action) => action,
+        Err(error) => {
+            unsafe {
+                libc::sigaction(libc::SIGTERM, &term, std::ptr::null_mut());
+                libc::sigaction(libc::SIGINT, &int_signal, std::ptr::null_mut());
+            }
+            return Err(error);
+        }
+    };
+    Ok(ArmedSignals { term, int_signal, usr1 })
 }
 
 fn install(signal: i32) -> std::io::Result<libc::sigaction> {
@@ -68,6 +93,7 @@ impl Drop for ArmedSignals {
         unsafe {
             libc::sigaction(libc::SIGTERM, &self.term, std::ptr::null_mut());
             libc::sigaction(libc::SIGINT, &self.int_signal, std::ptr::null_mut());
+            libc::sigaction(libc::SIGUSR1, &self.usr1, std::ptr::null_mut());
         }
     }
 }
@@ -139,6 +165,10 @@ pub fn saw_term() -> bool {
 
 pub fn saw_int() -> bool {
     INT.load(Ordering::SeqCst)
+}
+
+pub fn saw_drain() -> bool {
+    DRAIN.load(Ordering::SeqCst)
 }
 
 pub fn python_root() -> PathBuf {
@@ -369,6 +399,8 @@ mod tests {
         assert!(saw_term());
         on_signal(libc::SIGINT);
         assert!(saw_int());
+        on_signal(libc::SIGUSR1);
+        assert!(saw_drain());
         on_signal(0);
         assert!(python_root().ends_with("python"));
     }

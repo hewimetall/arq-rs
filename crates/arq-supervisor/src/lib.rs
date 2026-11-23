@@ -29,6 +29,7 @@ pub use child::{
 };
 pub use control::{poll_kills, poll_kills_default, Binding};
 pub use pidfd::{prepare_child_runtime, ParentWatch, PARENT_FD_ENV};
+pub use policy::{exit_effects, exit_for_storage, max_tasks_reached};
 pub use registry::{heartbeat_supervisor, hostname, register_supervisor, release_supervisor, RegistryBody, RegistryChild};
 pub use signals::Shutdown;
 pub use spawn::{spawn_slot, CommandSpec, SPAWN_CRATE};

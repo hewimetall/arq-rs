@@ -227,7 +227,14 @@ impl RedisBackend {
             };
         }
         let inflight = session.zrange_by_score(&keys.inflight(), "-inf", &now.to_string(), CLAIM_CANDIDATE_WINDOW)?;
-        let ready = session.zrange_by_score(&keys.ready(), "-inf", &now.to_string(), CLAIM_CANDIDATE_WINDOW)?;
+        // One poll considers one window. Overdue inflight is read first, including when ready
+        // is non-empty. Ready is read only when that inflight window is empty.
+        let ready_limit = ready_candidate_limit(inflight.len());
+        let ready = if ready_limit == 0 {
+            Vec::new()
+        } else {
+            session.zrange_by_score(&keys.ready(), "-inf", &now.to_string(), ready_limit)?
+        };
         let mut seen = Vec::new();
         for member in inflight.into_iter().chain(ready) {
             if seen.iter().any(|seen: &String| seen == &member) {
@@ -837,6 +844,15 @@ enum ClaimFlow {
     Stop(Step<ClaimResult>),
 }
 
+/// Ready members included in this poll. A non-empty overdue inflight window uses the whole budget.
+fn ready_candidate_limit(inflight_len: usize) -> usize {
+    if inflight_len == 0 {
+        CLAIM_CANDIDATE_WINDOW
+    } else {
+        0
+    }
+}
+
 fn queue_keys(queue: &str) -> Result<QueueKeys, Fail> {
     QueueKeys::new(queue).map_err(|error| Fail::Backend(BackendError::Input(error)))
 }
@@ -1014,7 +1030,22 @@ fn claim_result(
         Fail::Backend(inconsistency(queue, Some(operation), "proved claim has no task_id"))
     })?;
     if status == ReceiptStatus::Dead || observed.state == Some(TaskState::Dead) {
-        return Ok(ClaimResult::DeadLetter { task_id, reason: observed.reason.clone(), replayed });
+        let kwargs = if observed.kwargs_canonical.is_empty() {
+            "{}".to_string()
+        } else {
+            observed.kwargs_canonical.clone()
+        };
+        return Ok(ClaimResult::DeadLetter {
+            task_id,
+            reason: observed.reason.clone(),
+            replayed,
+            actor_name: observed.actor_name.clone(),
+            kwargs_canonical: kwargs,
+            message_id: observed.message_id.map(|id| id.to_string()).unwrap_or_default(),
+            retries: observed.retries,
+            deliveries: observed.deliveries,
+            error: observed.error.clone(),
+        });
     }
     let token = observed.delivery_token.ok_or_else(|| {
         Fail::Backend(inconsistency(queue, Some(operation), "proved claim has no delivery token"))
@@ -1090,8 +1121,8 @@ fn requeue_override(loaded: &Loaded, cycle: CycleId) -> Option<RequeueResult> {
 #[cfg(test)]
 mod decision_tests {
     use super::{
-        align_finish, claim_result, control_from_status, control_override, duplicate_of, requeue_from_status, requeue_override,
-        status_or_inconsistent,
+        align_finish, claim_result, control_from_status, control_override, duplicate_of, ready_candidate_limit, requeue_from_status,
+        requeue_override, status_or_inconsistent,
     };
     use crate::error::BackendError;
     use crate::observe::Loaded;
@@ -1100,7 +1131,7 @@ mod decision_tests {
     use arq_core::ObservedTask;
     use arq_core::{
         CanonicalUuid, CycleId, DeliveryToken, MessageIdentity, OperationId, OperationKind, OutcomeProposal, ParsedOutcome,
-        ReceiptRecord, ReceiptStatus, StorageInconsistency, TaskId, TaskState,
+        ReceiptRecord, ReceiptStatus, StorageInconsistency, TaskId, TaskState, CLAIM_CANDIDATE_WINDOW,
     };
 
     fn uuid(byte: u8) -> CanonicalUuid {
@@ -1154,6 +1185,13 @@ mod decision_tests {
             min_backoff_ms: 1,
             max_backoff_ms: 1,
         }
+    }
+
+    #[test]
+    fn one_poll_reads_ready_only_when_the_inflight_window_is_empty() {
+        assert_eq!(ready_candidate_limit(0), CLAIM_CANDIDATE_WINDOW);
+        assert_eq!(ready_candidate_limit(1), 0);
+        assert_eq!(ready_candidate_limit(CLAIM_CANDIDATE_WINDOW), 0);
     }
 
     #[test]

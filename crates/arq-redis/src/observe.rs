@@ -106,6 +106,9 @@ fn hash_to_task(fields: &[(String, String)]) -> ObservedTask {
     observed.retries = get("retries").and_then(|text| text.parse().ok()).unwrap_or(0);
     observed.max_deliveries = get("max_deliveries").and_then(|text| text.parse().ok()).unwrap_or(0);
     observed.max_retries = get("max_retries").and_then(|text| text.parse().ok()).unwrap_or(0);
+    observed.time_limit_ms = get("time_limit_ms").and_then(|text| text.parse().ok()).unwrap_or(0);
+    observed.min_backoff_ms = get("min_backoff_ms").and_then(|text| text.parse().ok()).unwrap_or(0);
+    observed.max_backoff_ms = get("max_backoff_ms").and_then(|text| text.parse().ok()).unwrap_or(0);
     observed.lease_deadline_ms = get("lease_deadline_ms").and_then(|text| text.parse().ok());
     observed.started_at_ms = get("started_at_ms").and_then(|text| text.parse().ok());
     observed.finished_at_ms = get("finished_at_ms").and_then(|text| text.parse().ok());

@@ -646,30 +646,24 @@ fn drop_before_exec_leaves_the_ready_member() {
 fn claim_window_prefers_expired_inflight_and_skips_a_lost_race() {
     harness(async {
         let backend = open_backend(&[("ARQ_WATCH_RETRIES", "1")]);
+        // Claim while the inflight window is empty, then expire those leases. The next poll
+        // must spend its window of 16 on overdue inflight and leave the new ready task.
         for n in 20..36 {
             enqueue(&backend, job(n, Some(&format!("item:{n}")), 0)).await;
             let claimed = claim_to(&backend, n, 15_000).await;
             let _ = delivered(&claimed);
-            backend
-                .cancel(ControlRequest { operation_id: op(200 + n), queue: "default".into(), task_id: ident(n).task_id })
-                .await
-                .unwrap();
-            let mut con = conn();
+        }
+        let mut con = conn();
+        for n in 20..36 {
             let _: i64 = redis::cmd("ZADD").arg("q:{default}:inflight").arg(1).arg(ident(n).task_id.to_string()).query(&mut con).unwrap();
             let _: i64 = redis::cmd("HSET").arg(job_key(n)).arg("lease_deadline_ms").arg(1).query(&mut con).unwrap();
         }
         enqueue(&backend, job(36, Some("item:36"), 0)).await;
-        let claimed = claim_to(&backend, 36, 15_000).await;
-        let _ = delivered(&claimed);
-        let mut con = conn();
-        let _: i64 = redis::cmd("ZADD").arg("q:{default}:inflight").arg(2).arg(ident(36).task_id.to_string()).query(&mut con).unwrap();
-        let _: i64 = redis::cmd("HSET").arg(job_key(36)).arg("lease_deadline_ms").arg(1).query(&mut con).unwrap();
-        let _: i64 = redis::cmd("HDEL").arg(job_key(36)).arg("control_op").query(&mut con).unwrap();
-        enqueue(&backend, job(37, Some("item:37"), 0)).await;
-        let taken = claim_to(&backend, 370, 15_000).await;
-        let observed = delivered(&taken);
-        assert_eq!(observed.task_id, Some(ident(37).task_id));
-        assert_eq!(hget(&job_key(36), "state").as_deref(), Some("inflight"));
+        let blocked = claim_to(&backend, 360, 15_000).await;
+        let overdue = delivered(&blocked);
+        assert_ne!(overdue.task_id, Some(ident(36).task_id));
+        assert!((20..36).any(|n| overdue.task_id == Some(ident(n).task_id)));
+        assert_eq!(hget(&job_key(36), "state").as_deref(), Some("ready"));
 
         flush();
         enqueue(&backend, job(38, Some("item:38"), 0)).await;

@@ -8,9 +8,11 @@
 //! It does not initialize CPython and it does not keep a second slot machine.
 //! `--factory` is forwarded to the child. The child arms restart signals, watches
 //! the parent pidfd, and only then initializes Python and calls the factory.
+//! The child then claims, dispatches, renews, and finishes one task at a time.
 
 mod child;
 mod cli;
+mod delivery;
 mod parent;
 
 pub use child::run_child;

@@ -589,11 +589,11 @@ mod tests {
         assert_eq!(report.finished, 0);
 
         let mut dead = Scripts::default();
-        dead.claims.push_back(Ok(ClaimResult::DeadLetter {
-            task_id: TaskId::from_uuid(CanonicalUuid::from_random_v4(6u128.to_be_bytes())),
-            reason: "max_deliveries".into(),
-            replayed: false,
-        }));
+        dead.claims.push_back(Ok(ClaimResult::dead_letter(
+            TaskId::from_uuid(CanonicalUuid::from_random_v4(6u128.to_be_bytes())),
+            "max_deliveries",
+            false,
+        )));
         let session = ChildSession::scripted(ChildParams::test_fast(), dead, DispatchMode::ok_now());
         let control = session.control.clone();
         control.request_drain();
@@ -603,11 +603,11 @@ mod tests {
         assert_eq!(report.on_stop, 1);
 
         let mut dead = Scripts::default();
-        dead.claims.push_back(Ok(ClaimResult::DeadLetter {
-            task_id: TaskId::from_uuid(CanonicalUuid::from_random_v4(7u128.to_be_bytes())),
-            reason: "max_deliveries".into(),
-            replayed: false,
-        }));
+        dead.claims.push_back(Ok(ClaimResult::dead_letter(
+            TaskId::from_uuid(CanonicalUuid::from_random_v4(7u128.to_be_bytes())),
+            "max_deliveries",
+            false,
+        )));
         let session = ChildSession::scripted(ChildParams::test_fast(), dead, DispatchMode::ok_now());
         session.control.request_drain();
         let control = session.control.clone();
@@ -618,11 +618,11 @@ mod tests {
         // The request above races the first tick. Drive it explicitly instead.
         drop(task);
         let mut dead = Scripts::default();
-        dead.claims.push_back(Ok(ClaimResult::DeadLetter {
-            task_id: TaskId::from_uuid(CanonicalUuid::from_random_v4(8u128.to_be_bytes())),
-            reason: "max_deliveries".into(),
-            replayed: false,
-        }));
+        dead.claims.push_back(Ok(ClaimResult::dead_letter(
+            TaskId::from_uuid(CanonicalUuid::from_random_v4(8u128.to_be_bytes())),
+            "max_deliveries",
+            false,
+        )));
         let mut session = ChildSession::scripted(ChildParams::test_fast(), dead, DispatchMode::ok_now());
         session.max_ticks = Some(3);
         let control = session.control.clone();

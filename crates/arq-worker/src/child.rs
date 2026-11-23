@@ -1,17 +1,12 @@
 //! Child process. Restart signals and the parent pidfd are armed before Python.
 //! `--factory` runs in this process and must return an App.
 
-use std::time::Duration;
-
 use pyo3::prelude::*;
 
-use arq_pybridge::{
-    add_python_path, arm_restart_signals, init_child_interpreter, load_application, saw_int,
-    saw_term,
-};
+use arq_pybridge::{add_python_path, arm_restart_signals, init_child_interpreter, load_application};
 use arq_supervisor::prepare_child_runtime;
 
-use crate::cli::{redis_endpoint_label, ChildPlan};
+use crate::cli::ChildPlan;
 use crate::python_initialized;
 
 pub fn run_child(plan: ChildPlan) -> i32 {
@@ -41,6 +36,7 @@ pub fn run_child(plan: ChildPlan) -> i32 {
 
 async fn child_session(plan: ChildPlan, armed: arq_pybridge::ArmedSignals) -> i32 {
     let mut failure: Option<String> = None;
+    let mut loaded_app: Option<Py<PyAny>> = None;
     let prepared = prepare_child_runtime(|watch| {
         if !watch.ready_before_python() {
             failure = Some("parent watch was not armed before Python".into());
@@ -50,9 +46,9 @@ async fn child_session(plan: ChildPlan, armed: arq_pybridge::ArmedSignals) -> i3
             failure = Some(error.to_string());
             return;
         }
-        let loaded = Python::attach(|py| load_child_app(py, &plan));
-        if let Err(error) = loaded {
-            failure = Some(error);
+        match Python::attach(|py| load_child_app(py, &plan)) {
+            Ok(app) => loaded_app = Some(app),
+            Err(error) => failure = Some(error),
         }
     })
     .await;
@@ -67,32 +63,24 @@ async fn child_session(plan: ChildPlan, armed: arq_pybridge::ArmedSignals) -> i3
         eprintln!("arq-worker: {error}");
         return arq_core::CONFIG_EXIT_CODE;
     }
-    eprintln!(
-        "arq-worker child app={} factory={} queues={} concurrency={} tasks={} redis={}",
-        plan.app,
-        plan.factory,
-        plan.queues.join(","),
-        plan.concurrency,
-        plan.config.max_tasks_per_child,
-        redis_endpoint_label(&plan.redis_url)
-    );
-    while !child_should_stop(saw_term(), saw_int(), watch.exited()) {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    0
+    let Some(app) = loaded_app else {
+        eprintln!("arq-worker: application was not loaded");
+        return arq_core::CONFIG_EXIT_CODE;
+    };
+    crate::delivery::run(&plan, watch, app).await
 }
 
 pub fn child_should_stop(term: bool, interrupt: bool, parent_exited: bool) -> bool {
     term || interrupt || parent_exited
 }
 
-fn load_child_app(py: Python<'_>, plan: &ChildPlan) -> Result<(), String> {
+fn load_child_app(py: Python<'_>, plan: &ChildPlan) -> Result<Py<PyAny>, String> {
     add_python_path(py).map_err(|error| error.to_string())?;
     let app = load_application(py, &plan.app, plan.factory).map_err(|error| error.to_string())?;
     if app.getattr("dispatch").is_err() {
         return Err(format!("{} must be an App", plan.app));
     }
-    Ok(())
+    Ok(app.unbind())
 }
 
 #[cfg(test)]

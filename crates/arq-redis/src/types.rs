@@ -77,7 +77,34 @@ pub enum ClaimResult {
     Delivered(Delivery),
     /// Postconditions proved this delivery and a fresh Redis `TIME` is already at the lease deadline.
     OwnershipLost { exit_code: i32, task_id: TaskId, delivery_token: DeliveryToken },
-    DeadLetter { task_id: TaskId, reason: String, replayed: bool },
+    DeadLetter {
+        task_id: TaskId,
+        reason: String,
+        replayed: bool,
+        actor_name: String,
+        kwargs_canonical: String,
+        message_id: String,
+        retries: u64,
+        deliveries: u64,
+        error: String,
+    },
+}
+
+impl ClaimResult {
+    /// A scripted dead letter. The notice fields are empty because no handler ran.
+    pub fn dead_letter(task_id: TaskId, reason: impl Into<String>, replayed: bool) -> Self {
+        Self::DeadLetter {
+            task_id,
+            reason: reason.into(),
+            replayed,
+            actor_name: String::new(),
+            kwargs_canonical: "{}".into(),
+            message_id: String::new(),
+            retries: 0,
+            deliveries: 0,
+            error: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

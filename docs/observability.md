@@ -23,6 +23,8 @@
 
 Те же корзины используют гистограммы задержек ниже.
 
+После успешного `finish` child вызывает `record_outcome`. Retry увеличивает `dramatiq_message_retries_total`. Dead и `invalid_outcome` увеличивают `dramatiq_message_rejects_total`. Ok и skipped эти счётчики не меняют. Claim, который сам записал `max_deliveries` или `invalid_message`, делает то же и вызывает `note_dead`. Ошибка записи метрики commit не откатывает. `finish_attempt` в Python эти счётчики не увеличивает: повторный вызов до commit посчитал бы незафиксированный retry.
+
 Дополнительные метрики. Labels — только перечисленные, без `task_id`, `message_id`, `operation_id`, `delivery_token` и tag.
 
 | Имя | Labels | Смысл |
