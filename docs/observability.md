@@ -47,6 +47,8 @@
 
 `slot` в RSS — номер слота supervisor, не идентификатор задачи. После смерти child gauge RSS этого слота снимается, а `dramatiq_messages_inprogress` уменьшается снятием multiprocess-файла слота. Завышенный gauge после смерти child тестом запрещён.
 
+Как Rust-метрики `arq_*` попадают в тот же multiprocess-экспорт, что и Python-метрики, этот контракт не задаёт. Это отдельный ADR. Имена и labels выше от этого не меняются.
+
 Ожидание в очереди считается от `available_at_ms` до успешного claim и попадает в histogram `arq_queue_wait_milliseconds` с label `queue_name`.
 
 ## Логи

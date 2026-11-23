@@ -45,21 +45,32 @@ QueueControl → cancel / kill / requeue / settle
 - Отдельный recovery-sweeper не запускается. Чтение состояния данные не исправляет.
 - Signal handler процесса, который перезапускает child, устанавливается до инициализации Python в этом процессе. Родительский supervisor CPython не инициализирует и вооружает `SIGTERM` и `SIGINT` до запуска слотов. Child инициализирует интерпретатор с `install_signal_handlers = 0`.
 
-Подробности транспорта — в [operations.md](operations.md), ключей — в [redis-keys.md](redis-keys.md), состава крейтов — в [ADR 0008](adr/0008-sans-io-and-crates.md).
+Подробности транспорта — в [operations.md](operations.md), ключей — в [redis-keys.md](redis-keys.md), состава крейтов и дистрибуции — в [ADR 0008](adr/0008-sans-io-workspace-crates.md).
 
 ## Крейты
 
-Workspace плоский: `crates/<имя>`, виртуальный корневой `Cargo.toml`, общие версии в `[workspace.dependencies]`. Протокол и стейт-машины не открывают сеть, `tokio` и `pyo3`. Адаптер передаёт им время и случайность аргументами и сам выполняет команды.
+Workspace плоский: `crates/<имя>`, виртуальный корневой `Cargo.toml`, общие версии в `[workspace.dependencies]` и `[workspace.package]`. Протокол и стейт-машины не открывают сеть, `tokio` и `pyo3`. Адаптер передаёт им время и случайность аргументами и сам выполняет команды.
 
-| Крейт | Содержимое | Зависит от |
+| Крейт | Содержимое | Зависит от | Публикация |
+|---|---|---|---|
+| `arq-core` | Идентификаторы, `Config` (`ARQ_*`), разбор `OutcomeProposal`, ошибки, `AttemptLifecycle`, `AdmissionGate`, `SlotLifecycle`, `PingWatch`, план операций и проверка постусловий | только `std` и `serde` | нет |
+| `arq-redis` | `RedisBackend`: цикл `WATCH / MULTI / EXEC`, receipt, maintenance batch, `QueueAdmin`, `QueueControl`, реестр supervisor | `arq-core`, `redis`, `tokio` | нет |
+| `arq-pybridge` | PyO3: `Client`, `QueueAdmin`, `QueueControl`, `App.dispatch`, `note_dead`, loop ping, child-интерпретатор | `arq-core`, `arq-redis`, `pyo3` | wheel `arq-rs` |
+| `arq-supervisor` | Родитель без CPython: слоты, `watchexec-supervisor`, сигналы, память и RSS, backoff, metrics helper | `arq-core`, `arq-redis`, `watchexec-supervisor` | нет |
+| `arq-worker` | Бинарник и CLI (`--app`, `--factory`). Единственная точка сборки всех четырёх крейтов | все четыре | wheel `arq-rs-worker` |
+
+`arq-core` не зависит от `tokio`, `redis`, `pyo3` и файловой системы. `arq-supervisor` не зависит от `arq-pybridge` ни прямо, ни транзитивно: `cargo tree -p arq-supervisor -i pyo3` пуст. Новый крейт добавляется только новым ADR.
+
+## Дистрибуция
+
+Публикуются два пакета одной версии из `workspace.package.version`.
+
+| Дистрибутив | Содержимое | Сборка |
 |---|---|---|
-| `arq-core` | Идентификаторы, `Config` (`ARQ_*`), разбор `OutcomeProposal`, ошибки, `AttemptLifecycle`, `AdmissionGate`, `SlotLifecycle`, `PingWatch`, план операций и проверка постусловий | ничего из IO |
-| `arq-redis` | `RedisBackend`: цикл `WATCH / MULTI / EXEC`, receipt, maintenance batch, `QueueAdmin`, `QueueControl`, реестр supervisor | `arq-core`, `redis`, `tokio` |
-| `arq-pybridge` | PyO3: child-интерпретатор, `App.dispatch`, `note_dead`, loop ping, классы `Client`, `QueueAdmin`, `QueueControl` | `arq-core`, `arq-redis`, `pyo3` |
-| `arq-supervisor` | Родитель без CPython: слоты, `watchexec-supervisor`, сигналы, память и RSS, backoff, metrics helper | `arq-core`, `arq-redis`, `watchexec-supervisor` |
-| `arq-worker` | Бинарник и CLI (`--app`, `--factory`). Единственная точка, которая собирает все четыре крейта | все четыре |
+| `arq-rs` | Python-пакет `arq_rs` и расширение `arq_rs._native` | `maturin` из корневого `pyproject.toml` |
+| `arq-rs-worker` | бинарник `arq-worker` | отдельный скрипт сборки wheel |
 
-`arq-core` не зависит от `tokio`, `redis`, `pyo3` и файловой системы. `arq-supervisor` не зависит от `arq-pybridge` ни прямо, ни транзитивно. Публичный импорт Python остаётся `arq_rs`; расширение собирает `arq-pybridge`. Новый крейт добавляется только новым ADR.
+`arq-pybridge` имеет `crate-type = ["cdylib", "rlib"]`. Feature `extension-module` включает только сборка maturin. `arq-worker` этот feature не включает, линкуется с libpython и зависит от `arq-pybridge` как от rlib. CI собирает manylinux-wheel для `x86_64` и `aarch64`. Smoke-проверка в чистом venv ставит оба пакета одной версии и запускает `arq-worker --version` и `python -c "import arq_rs"`. Единый wheel не собирается.
 
 ## Поток одной доставки
 

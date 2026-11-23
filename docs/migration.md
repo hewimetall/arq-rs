@@ -76,6 +76,10 @@ Scores и поля времени — Unix-миллисекунды от Redis `
 
 Частичный `EXEC` останавливает изменения очереди в процессе. Донор такой остановки не описывает.
 
+## Пакеты
+
+Донор выпускает два wheel. arq-rs делает то же: `arq-rs` несёт пакет `arq_rs` и расширение `arq_rs._native`, `arq-rs-worker` несёт бинарник `arq-worker`. Версия обоих берётся из `workspace.package.version`. Feature `extension-module` включает только сборка расширения. Бинарник линкуется с libpython.
+
 ## Runtime, который ещё надо подключить
 
 `SlotLifecycle` и `AdmissionGate` на SHA донора supervisor loop не вызывает. `AttemptLifecycle` у донора собирается локально в момент finish. В arq-rs все три типа живут в `arq-core`. Они считаются перенесёнными, только когда их вызывает цикл `arq-supervisor` или child и это покрыто интеграционным тестом. Наличие этих типов в дереве simple-q само по себе runtime не переносит. Строки manifest в [architecture.md](architecture.md) закрываются только этим тестом.
