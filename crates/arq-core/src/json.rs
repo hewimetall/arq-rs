@@ -2,8 +2,15 @@
 //!
 //! Object keys are emitted in lexicographic order with no whitespace.
 //! Number lexemes are preserved, so `1` and `1.0` stay distinct.
+//!
+//! Parsing rejects documents deeper than [`MAX_JSON_DEPTH`]. A top-level
+//! value counts as one. The limit is checked before the recursive call, so a
+//! deeply nested payload fails closed instead of growing the stack.
 
 use std::fmt;
+
+/// Maximum number of nested JSON values [`Json::parse`] will accept.
+pub const MAX_JSON_DEPTH: usize = 64;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Json {
@@ -32,7 +39,7 @@ impl std::error::Error for JsonError {}
 
 impl Json {
     pub fn parse(text: &str) -> Result<Self, JsonError> {
-        let mut parser = Parser { src: text, i: 0 };
+        let mut parser = Parser { src: text, i: 0, depth: 0 };
         let value = parser.parse_value()?;
         parser.skip_ws();
         if parser.i != parser.src.len() {
@@ -151,6 +158,7 @@ fn push_string(out: &mut String, text: &str) {
 struct Parser<'a> {
     src: &'a str,
     i: usize,
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -179,6 +187,16 @@ impl<'a> Parser<'a> {
 
     fn parse_value(&mut self) -> Result<Json, JsonError> {
         self.skip_ws();
+        if self.depth >= MAX_JSON_DEPTH {
+            return Err(self.err("nesting too deep"));
+        }
+        self.depth += 1;
+        let parsed = self.parse_contained();
+        self.depth -= 1;
+        parsed
+    }
+
+    fn parse_contained(&mut self) -> Result<Json, JsonError> {
         match self.peek() {
             Some(b'n') => self.parse_literal("null", Json::Null),
             Some(b't') => self.parse_literal("true", Json::Bool(true)),

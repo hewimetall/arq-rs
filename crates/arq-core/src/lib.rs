@@ -34,7 +34,7 @@ pub use ids::{
     CanonicalUuid, CycleId, DeliveryToken, FillBytes, InvalidIdentifier, MessageId, MessageIdentity, OperationId,
     SliceBytes, TaskId,
 };
-pub use json::{Json, JsonError};
+pub use json::{Json, JsonError, MAX_JSON_DEPTH};
 pub use keys::{is_shared_index, key_kind, validate_opaque, validate_queue, QueueKeys};
 pub use outcome::{dispatch_exception, parse_outcome, OutcomeFault, OutcomeProposal, ParsedOutcome};
 pub use ping::{LoopEvent, PingDecision, PingWatch, PING_BUDGET_EXIT_CODE};

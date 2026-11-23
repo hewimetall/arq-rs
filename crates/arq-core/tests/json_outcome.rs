@@ -78,6 +78,26 @@ fn json_parser_rejects_bad_documents() {
 }
 
 #[test]
+fn json_parser_rejects_nesting_past_the_limit() {
+    let arrays = |depth: usize| format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
+    let objects = |depth: usize| format!("{}0{}", "{\"a\":".repeat(depth), "}".repeat(depth));
+
+    let at_limit = Json::parse(&arrays(MAX_JSON_DEPTH - 1)).unwrap();
+    assert_eq!(at_limit.canonical().matches('[').count(), MAX_JSON_DEPTH - 1);
+    let nested = Json::parse(&objects(MAX_JSON_DEPTH - 1)).unwrap();
+    assert_eq!(nested.canonical().matches('{').count(), MAX_JSON_DEPTH - 1);
+    let empty = format!("{}{}", "[".repeat(MAX_JSON_DEPTH), "]".repeat(MAX_JSON_DEPTH));
+    assert_eq!(Json::parse(&empty).unwrap().canonical().len(), MAX_JSON_DEPTH * 2);
+
+    for text in [arrays(MAX_JSON_DEPTH), objects(MAX_JSON_DEPTH)] {
+        let err = Json::parse(&text).unwrap_err();
+        assert_eq!(err.message, "nesting too deep");
+        assert!(err.to_string().contains("nesting too deep"));
+        assert!(err.position < text.len());
+    }
+}
+
+#[test]
 fn outcome_parser_accepts_only_the_four_proposals() {
     let ok = parse_outcome(&object(r#"{"outcome":"ok"}"#));
     assert_eq!(ok, ParsedOutcome::Proposal(OutcomeProposal::Ok));
