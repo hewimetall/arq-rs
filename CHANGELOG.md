@@ -31,6 +31,6 @@
 
 `QueuePort` не переносится. Транспорт — `RedisBackend` с операциями `enqueue`, `claim`, `renew`, `finish`, `requeue` и `control`. Отдельно подключать ещё нужно только `SlotLifecycle`, `AdmissionGate` и `AttemptLifecycle`.
 
-Принят ADR 0008. Workspace делится на `arq-core`, `arq-redis`, `arq-pybridge`, `arq-supervisor` и `arq-worker`. Ядро не зависит от сети, `tokio` и `pyo3`. `arq-supervisor` не зависит от `arq-pybridge`. Строка `Queue port` из manifest убрана.
+Предложен ADR 0008. Workspace делится на `arq-core`, `arq-redis`, `arq-pybridge`, `arq-supervisor` и `arq-worker`. Ядро не зависит от сети, `tokio` и `pyo3`. `arq-supervisor` не зависит от `arq-pybridge`. Строка `Queue port` из manifest убрана.
 
 Дистрибуция — два пакета одной версии: `arq-rs` и `arq-rs-worker`. Feature `extension-module` включает только maturin. Общий экспорт Rust-метрик `arq_*` и Python-метрик оставлен отдельному ADR.
