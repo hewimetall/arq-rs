@@ -1,0 +1,28 @@
+[package]
+name = "arq-pybridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "PyO3 bridge for arq-rs. Maturin builds arq_rs._native; arq-worker links the rlib."
+
+[lib]
+name = "arq_pybridge"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+arq-core = { workspace = true }
+arq-redis = { workspace = true }
+pyo3 = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+libc = "0.2"
+
+[dev-dependencies]
+arq-core = { workspace = true }
+pyo3 = { workspace = true }
+libc = "0.2"

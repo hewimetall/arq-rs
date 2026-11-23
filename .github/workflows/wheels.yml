@@ -1,0 +1,117 @@
+name: wheels
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  arq-rs:
+    name: arq-rs manylinux (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: auto
+          rust-toolchain: 1.99.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-arq-rs-${{ matrix.target }}
+          path: dist/*
+
+  arq-rs-worker:
+    name: arq-rs-worker manylinux (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the worker version pin
+        run: scripts/build-worker-wheel.sh --check
+      # maturin-action, not the host cargo in build-worker-wheel.sh.
+      # The action supplies the manylinux sysroot for matrix.target, so the
+      # aarch64 job does not emit an x86_64 binary.
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --manifest-path crates/arq-worker/Cargo.toml
+          manylinux: auto
+          rust-toolchain: 1.99.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-arq-rs-worker-${{ matrix.target }}
+          path: dist/*
+
+  release-gate:
+    name: annotated release tag
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require an annotated tag
+        run: |
+          kind=$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")
+          if [ "$kind" != "tag" ]; then
+            echo "${GITHUB_REF_NAME} is a ${kind}. Publish accepts an annotated v* tag only." >&2
+            exit 1
+          fi
+
+  publish:
+    name: publish both distributions
+    needs: [arq-rs, arq-rs-worker, release-gate]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # The pypi environment must require a reviewer. Tag creation on this
+    # repository must stay restricted to maintainers. workflow_dispatch does
+    # not reach this job.
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: wheels-*
+          merge-multiple: true
+      - name: Split wheels by filename prefix
+        run: |
+          mkdir -p dist/arq-rs dist/arq-rs-worker
+          find artifacts -type f -name 'arq_rs_worker-*' -exec cp {} dist/arq-rs-worker/ \;
+          find artifacts -type f -name 'arq_rs-*' ! -name 'arq_rs_worker-*' -exec cp {} dist/arq-rs/ \;
+      - name: Publish arq-rs
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/arq-rs
+      - name: Publish arq-rs-worker
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/arq-rs-worker
+
+  smoke:
+    name: clean venv smoke
+    needs: [arq-rs, arq-rs-worker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: wheels-*-x86_64
+          merge-multiple: true
+      - name: Install both wheels of one version and import them
+        env:
+          SMOKE_ARCH: x86_64
+        run: scripts/smoke-venv.sh artifacts

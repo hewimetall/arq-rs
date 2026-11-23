@@ -2,11 +2,21 @@
 
 Redis-очередь для Python async-обработчиков. Rust выполняет транспорт, владеет доставкой и управляет child-процессами. Python выполняет handler, middleware и lifecycle.
 
-**Статус: нормативный контракт.** Код очереди в этом репозитории ещё не написан. Наличие правила в документации не означает, что оно уже реализовано. Предложенное поведение ниже и есть контракт реализации; расхождение с ним оформляется ADR вместе с кодом и тестами.
+**Статус: нормативный контракт.** Код очереди лежит в крейтах `arq-core`, `arq-redis`, `arq-pybridge`, `arq-supervisor`, `arq-worker` и в пакете `python/arq_rs`. Транспорт выполняет `RedisBackend` в `arq-redis`. Текст документов задаёт контракт. Расхождение с ним оформляется ADR.
 
 Дата контракта: 2026-11-23.
 
 Исходный execution runtime: [`hewimetall/simple-redis-q`](https://github.com/hewimetall/simple-redis-q) `483e9fc063103708bdf37bfe80ddbc91af2a2fd5` (head PR №42). Перенос покомпонентно описан в [docs/architecture.md](docs/architecture.md). Модуль, не вызванный production-путём донора, не считается уже интегрированным runtime.
+
+## Не закрыто
+
+`AttemptLifecycle` реализован и покрыт unit-тестами в `arq-core`: тип в `crates/arq-core/src/attempt.rs`, тесты в `crates/arq-core/tests/machines.rs`. Цикл child и `arq-supervisor` событий ему не посылают. Строка manifest остаётся открытой, пока цикл child или supervisor не проведёт эту машину и интеграционный тест не покроет этот вызов (ADR 0001, ADR 0008).
+
+Ряды `arq_*` из [docs/observability.md](docs/observability.md) крейты Rust не выпускают. `python/arq_rs/metrics.py` записывает имена `dramatiq_*`. Сведение `arq_*` в тот же multiprocess-экспорт — отдельный ADR. Имена и labels в `docs/observability.md` до этого ADR не меняются.
+
+`Json::parse` отвергает документ глубже 64 значений и возвращает сообщение `nesting too deep`. Предел — `MAX_JSON_DEPTH` в `crates/arq-core`. Значение верхнего уровня считается за одно. Тот же предел записан рядом с `ARQ_MAX_MESSAGE_BYTES` в [docs/api.md](docs/api.md). Глубина от байтового потолка не зависит.
+
+Публикация wheel запускается только push-событием аннотированного тега `v*` внутри GitHub Environment `pypi`. `workflow_dispatch` собирает wheel и запускает smoke. Этот запуск публикацию не включает. Обязательные ревьюеры среды `pypi` задаются в настройках репозитория: workflow их не создаёт. Создание тегов `v*` остаётся ограниченным мейнтейнерами. Smoke ставит wheel архитектуры раннера: job скачивает `wheels-*-x86_64` и задаёт `SMOKE_ARCH=x86_64`. `scripts/smoke-venv.sh` берёт платформенный тег как последний компонент имени по `-`. Совпадение архитектуры — суффикс этого тега, поэтому `x86_64` читается целиком в конце тега. Скрипт завершается, если для этой архитектуры и тега CPython остаётся больше одного wheel.
 
 ## Границы
 
@@ -18,7 +28,7 @@ Redis-очередь для Python async-обработчиков. Rust выпо
 
 | Документ | Содержание |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Процессы, границы Rust и Python, manifest переноса |
+| [docs/architecture.md](docs/architecture.md) | Процессы, пять крейтов, границы Rust и Python, manifest переноса |
 | [docs/api.md](docs/api.md) | `App`, `Client`, middleware, admin, control, конфигурация |
 | [docs/redis-keys.md](docs/redis-keys.md) | Ключи, поля задачи, receipt, retention |
 | [docs/operations.md](docs/operations.md) | Транзакции, исходы, retry, DLQ, cancel/kill, shutdown |

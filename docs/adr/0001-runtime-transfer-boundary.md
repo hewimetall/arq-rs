@@ -12,8 +12,10 @@ PR №42 `hewimetall/simple-redis-q` на SHA `483e9fc063103708bdf37bfe80ddbc91a
 
 Перенос копирует только компоненты с указанным вызывающим путём. Для каждого компонента manifest в `docs/architecture.md` называет исходный символ, вызывающий путь донора, точку подключения arq-rs и тесты.
 
-`SlotLifecycle`, `AdmissionGate` и `QueuePort` подключаются в arq-rs отдельной интеграцией. До неё они не описываются как готовый runtime. Старый Redis-адаптер донора заменяется протоколом этого контракта и не переносится как транспорт.
+`supervise_slot` в `arq-supervisor` проводит `SlotLifecycle` событиями `ProcessEvent` Ready, Drain, Stop, Reaped, Crash и StartFailed. `arq-supervisor` вызывает `AdmissionGate`: `supervisor.rs` закрывает ворота на drain, `child.rs` проверяет `blocks_claim` перед claim. Цикл child и supervisor машину `AttemptLifecycle` не проводят. Строка manifest для неё остаётся открытой, пока один из этих циклов не пошлёт событие и интеграционный тест не покроет вызов.
+
+`QueuePort` не переносится. Транспорт реализуется напрямую через `RedisBackend`, без второй реализации и без порта. `RedisBackend` выполняет `enqueue`, `claim`, `renew`, `finish`, `requeue` и `control` из `docs/operations.md`. `control` включает `cancel`, `kill` и `settle`. Ему же принадлежат maintenance batch и чтение для `QueueAdmin`. Старый `redis_api` донора тоже не переносится.
 
 ## Последствия
 
-Реализация, которая копирует crate без вызова из supervisor или child, не закрывает соответствующий пункт manifest. Интеграционный тест из колонки manifest обязателен.
+Реализация, которая копирует crate без вызова из supervisor или child, не закрывает соответствующий пункт manifest. Интеграционный тест из колонки manifest обязателен. Размещение крейтов, дистрибуция и отказ от `QueuePort` задаёт [ADR 0008](0008-sans-io-workspace-crates.md).

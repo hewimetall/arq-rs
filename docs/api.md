@@ -1,6 +1,6 @@
 # Python API
 
-Статус: нормативный контракт от 2026-11-23. Сигнатуры ниже — поверхность, которую должна реализовать библиотека. Сейчас в репозитории этих модулей нет.
+Статус: нормативный контракт от 2026-11-23. Сигнатуры ниже остаются контрактом. Модули пакета лежат в `python/arq_rs`. Мост PyO3 — крейт `arq-pybridge`. Расхождение с документом оформляется ADR.
 
 Закреплённый ориентир: `simple_q.interfaces`, `simple_q.dispatch` и `docs/api.md` simple-q на SHA `483e9fc063103708bdf37bfe80ddbc91af2a2fd5`. Отличия собраны в [migration.md](migration.md).
 
@@ -94,7 +94,7 @@ class Client:
     async def close(self) -> None: ...
 ```
 
-`send` передаёт только аргументы handler. Служебные поля из `kwargs` не читаются. Возвращаемое значение — `message_id`. Занятый uniq поднимает `DuplicateTask`.
+`send` передаёт только аргументы handler. Служебные поля из `kwargs` не читаются. Возвращаемое значение — `message_id`. Занятый uniq поднимает `DuplicateTask`. Синхронной постановки нет: оба метода — корутины и требуют работающий event loop.
 
 `send_with_options` разделяет аргументы handler и параметры транспорта. Занятый uniq возвращает `None` и задачу не создаёт. Ошибка Redis в обоих методах остаётся исключением и в `None` не превращается.
 
@@ -236,7 +236,7 @@ Rust принимает от `dispatch` только следующие слов
 
 Пока `retries < max_retries`, исключение handler и timeout handler возвращают `retry`. Задержка считается функцией донора `compute_backoff`: показатель степени ограничен 32, база равна `min(min_backoff * 2**retries, max_backoff)`, результат равен `int(half + uniform(0, half))`, где `half = base / 2`. `retries` в формуле — уже записанное число, до текущего увеличения.
 
-Timeout ставится вокруг вызова handler внутри самого внутреннего слоя, после входа в `around_dispatch`. Цепочка middleware в этот таймер не входит. По таймеру handler получает отмену. Если кооперативная отмена не завершилась за `cancel_grace_ms`, child уничтожается, а доставка остаётся потерей владения: исход retry или dead для неё не синтезируется. Подавленная `CancelledError`, после которой `dispatch` всё же вернул допустимый словарь до конца grace, фиксируется как этот словарь.
+Timeout ставится вокруг вызова handler внутри самого внутреннего слоя, после входа в `around_dispatch`. Цепочка middleware в этот таймер не входит. По таймеру handler получает `CancelledError`. Это `BaseException`: ветка `except Exception` её не ловит. Если кооперативная отмена не завершилась за `cancel_grace_ms`, child уничтожается, а доставка остаётся потерей владения: исход retry или dead для неё не синтезируется. Подавленная `CancelledError`, после которой `dispatch` всё же вернул допустимый словарь до конца grace, фиксируется как этот словарь. Код, который держит GIL, крутится, пока GIL не отпустит. Такой затор останавливает ping budget кодом 2, а не отменой внутри handler. Потеря lease сама coroutine не обрывает: отмена запрашивается на потоке loop.
 
 Смерть child до передачи корректного результата — потеря доставки. Уже увеличенный `deliveries` сохраняется.
 
@@ -273,7 +273,7 @@ class QueueAdmin:
 
 `peek` принимает `ready`, `scheduled` и `inflight`. `scheduled` — это ready-задачи с временем доступности в будущем, отдельным состоянием не является.
 
-`Snapshot` содержит `taken_at`, `queues`, `supervisors` и `orphans`. Счётчики очереди включают глубину `ready`, `scheduled`, `inflight`, `done` и `dead`. У supervisor есть `children`, у child есть `tasks`. Снимок сохраняет host, PID, slot, RSS, причину выхода и счётчики supervisor: recycled, drains, kills, restarts. `retries` и `deliveries` видны отдельно. Свежесть heartbeat не доказывает ни жизнь, ни выход процесса. Отсутствие записи в DLQ не доказывает, что исполнение ещё идёт.
+`Snapshot` содержит `taken_at`, `queues`, `supervisors` и `orphans`. Счётчики очереди включают глубину `ready`, `scheduled`, `inflight`, `done` и `dead`. `ready` и `scheduled` разбивают один ZSET и не пересекаются: `ready` — score не больше Redis `TIME` снимка, `scheduled` — score больше этого времени. Их сумма равна `ZCARD` и есть величина, которую ограничивает `ARQ_MAX_READY`. У supervisor есть `children`, у child есть `tasks`. Снимок сохраняет host, PID, slot, RSS, причину выхода и счётчики supervisor: recycled, drains, kills, restarts. `retries` и `deliveries` видны отдельно. Свежесть heartbeat не доказывает ни жизнь, ни выход процесса. Отсутствие записи в DLQ не доказывает, что исполнение ещё идёт.
 
 Чтение не пишет heartbeat, не продлевает lease и не чинит индексы. Снимок не атомарен относительно всех ключей сразу.
 
@@ -317,15 +317,22 @@ class QueueControl:
         *,
         operation_id: str | None = None,
     ) -> RequeueResult: ...
+
+    async def settle(
+        self,
+        task_id: str,
+        *,
+        operation_id: str | None = None,
+    ) -> CommandReceipt: ...
 ```
 
-Других публичных методов управления supervisor нет. Поведение команд — в [operations.md](operations.md). Receipt подтверждает принятие команды, а не завершение остановки.
+Других публичных методов управления supervisor нет. `settle` управляет записью задачи, а не процессом: сигнал он не посылает. Поведение команд — в [operations.md](operations.md). Receipt `cancel` и `kill` подтверждает принятие команды, а не завершение остановки. Receipt `settle` со статусом `accepted` подтверждает уже записанный переход в DLQ.
 
 ```python
 class CommandReceipt:
     operation_id: str
     task_id: str
-    status: str  # accepted | already_terminal | not_found
+    status: str  # accepted | already_terminal | not_found | still_owned | not_blocked
     cycle_id: str | None
 
 
@@ -365,14 +372,16 @@ class RequeueResult:
 | `ARQ_MISSED_HEARTBEATS` | 4 | окно свежести для admin |
 | `ARQ_MAINTENANCE_INTERVAL_MS` | 60000 | период удаления terminal-записей |
 | `ARQ_MAINTENANCE_BATCH` | 100 | размер одного batch удаления |
-| `ARQ_WATCH_RETRIES` | 8 | повторы конфликта `WATCH` на одну попытку операции |
+| `ARQ_WATCH_RETRIES` | 8 | повторы конфликта `WATCH` одной задачи, не чужих обновлений общего индекса |
 | `ARQ_DONE_TTL_SECS` | 86400 | retention `done` |
 | `ARQ_DEAD_TTL_SECS` | 604800 | retention `dead` |
 | `ARQ_RECEIPT_TTL_SECS` | 691200 | retention receipt |
-| `ARQ_MAX_READY` | 100000 | предел всего ready, включая отложенные |
+| `ARQ_MAX_READY` | 100000 | мягкий предел `ZCARD` всего ready, включая отложенные |
 | `ARQ_MAX_MESSAGE_BYTES` | 1048576 | UTF-8 JSON `kwargs` |
 | `ARQ_MAX_HEADERS_BYTES` | 65536 | сумма байт ключей и значений headers |
 | `ARQ_MAX_ERROR_BYTES` | 4096 | сохраняемый текст ошибки |
+
+`ARQ_MAX_MESSAGE_BYTES` ограничивает байты UTF-8 `kwargs`. Глубина JSON считается отдельно. `Json::parse` в `crates/arq-core` считает значение верхнего уровня за одно и отвергает документ глубже `MAX_JSON_DEPTH` = 64 с сообщением `nesting too deep`.
 
 Неравенства: `renew_interval_ms + renew_confirm_ms < lease_ms`, `receipt_ttl >= dead_ttl >= done_ttl`, `0 < memory_soft_ratio < memory_hard_ratio < 1`. Если заданы оба байтовых порога child, мягкий меньше жёсткого. `max_ready >= 1`.
 

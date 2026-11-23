@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/arq-core",
+    "crates/arq-redis",
+    "crates/arq-pybridge",
+    "crates/arq-supervisor",
+    "crates/arq-worker",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+rust-version = "1.99.1"
+
+[workspace.dependencies]
+arq-core = { path = "crates/arq-core" }
+arq-redis = { path = "crates/arq-redis" }
+arq-pybridge = { path = "crates/arq-pybridge" }
+arq-supervisor = { path = "crates/arq-supervisor" }
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.54", features = ["rt"] }
+redis = { version = "1.8.2", default-features = false }
+pyo3 = { version = "0.30.1" }
+watchexec-supervisor = "=6.0.0"

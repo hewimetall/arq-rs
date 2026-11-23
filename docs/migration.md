@@ -64,7 +64,7 @@ arq-rs фиксирует одно правило. `ok`, `skipped`, `retry` и `
 
 `QueueAdmin` привязан к одной очереди в конструкторе. `peek` принимает `ready`, `scheduled` и `inflight`. Добавлены `get`, `dead_for_tag` и `command`. `scheduled` — срез ready с будущим score, не отдельное состояние Redis.
 
-`QueueControl` — новый интерфейс. `cancel`, `kill` и `requeue` в simple-q в этой форме отсутствуют. Их протокол задан в [operations.md](operations.md), а не выводится из старого admin.
+`QueueControl` — новый интерфейс. `cancel`, `kill`, `requeue` и `settle` в simple-q в этой форме отсутствуют. Их протокол задан в [operations.md](operations.md), а не выводится из старого admin. `settle` закрывает inflight с принятой командой после истечения lease, когда процесс нельзя отождествить.
 
 Пагинация больше не обрезает `limit` молча до 200: значение вне `1…200` поднимает `ValueError`.
 
@@ -72,12 +72,18 @@ arq-rs фиксирует одно правило. `ok`, `skipped`, `retry` и `
 
 Scores и поля времени — Unix-миллисекунды от Redis `TIME`. Донор в ряде ключей хранил секунды.
 
-Транспорт донора на этом SHA не является `WATCH / MULTI / EXEC` протоколом arq-rs. Перенос runtime не включает `redis_api` как реализацию очереди. Новый backend пишется по [operations.md](operations.md).
+Транспорт донора на этом SHA не является `WATCH / MULTI / EXEC` протоколом arq-rs. Перенос runtime не включает `redis_api` и `QueuePort`. Очередь пишет `RedisBackend` в крейте `arq-redis` по [operations.md](operations.md): `enqueue`, `claim`, `renew`, `finish`, `requeue`, `control`, maintenance batch и чтение для `QueueAdmin`.
 
 Частичный `EXEC` останавливает изменения очереди в процессе. Донор такой остановки не описывает.
 
-## Runtime, который ещё надо подключить
+## Пакеты
 
-`SlotLifecycle`, `AdmissionGate` и `QueuePort` на SHA донора supervisor loop не вызывает. Их наличие в дереве simple-q не означает, что arq-rs уже получил рабочий slot machine или drain gate. Строки manifest в [architecture.md](architecture.md) закрываются только новым интеграционным тестом.
+Донор выпускает два wheel. arq-rs делает то же: `arq-rs` несёт пакет `arq_rs` и расширение `arq_rs._native`, `arq-rs-worker` несёт бинарник `arq-worker`. Версия обоих берётся из `workspace.package.version`. Feature `extension-module` включает только сборка расширения. Бинарник линкуется с libpython.
 
-`AttemptLifecycle` у донора собирается локально в момент finish. В arq-rs это живое состояние одной доставки child.
+## Стейт-машины runtime
+
+`SlotLifecycle` и `AdmissionGate` на SHA донора supervisor loop не вызывает. `AttemptLifecycle` у донора собирается локально в момент finish. В arq-rs все три типа живут в `arq-core`. Наличие этих типов в дереве simple-q само по себе runtime не переносит.
+
+`supervise_slot` в `arq-supervisor` проводит `SlotLifecycle` событиями `ProcessEvent` Ready, Drain, Stop, Reaped, Crash и StartFailed. Production-цикл `crates/arq-worker/src/delivery.rs` владеет локальным `AdmissionGate`. `parent_or_signal_drain` закрывает его при выходе родителя и при `SIGUSR1`/`SIGTERM`/`SIGINT`. Перед claim `blocks_claim` проверяет этот же локальный экземпляр. Сценарная сессия `arq-supervisor/src/child.rs` использует ту же функцию. `close_admission` в `supervisor.rs` берёт блокировку другого экземпляра, поля `shared.gate`, и закрывает его. Закрытие ворот родителя само по себе claim child не останавливает. Колонка «Статус у донора» в manifest описывает донора.
+
+`AttemptLifecycle` покрыт unit-тестами `crates/arq-core/tests/machines.rs`. Цикл child и `arq-supervisor` событий ему не посылают. Строка manifest в [architecture.md](architecture.md) остаётся открытой, пока один из этих циклов не проведёт машину и интеграционный тест не покроет вызов (ADR 0001, ADR 0008).

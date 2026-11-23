@@ -1,0 +1,111 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": "1",
+        "title": "Scaffold the flat workspace and the two distribution manifests",
+        "description": "Create the Cargo workspace and maturin/Python packaging skeleton from ADR 0008, with no queue protocol and no product behavior.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [],
+        "details": "Follow docs/adr/0008-sans-io-workspace-crates.md and the crate table in docs/architecture.md. Add a virtual root Cargo.toml, [workspace.package], and [workspace.dependencies], and member paths crates/arq-core, crates/arq-redis, crates/arq-pybridge, crates/arq-supervisor, and crates/arq-worker. Share one workspace.package.version for both published distributions. Add the root pyproject.toml exactly as ADR 0008 specifies: maturin>=1.16,<2, manifest-path crates/arq-pybridge/Cargo.toml, features = [\"extension-module\"], python-source = \"python\", python-packages = [\"arq_rs\"], module-name = \"arq_rs._native\". arq-pybridge is crate-type [\"cdylib\", \"rlib\"] and the extension-module feature is pyo3/extension-module, enabled only by the maturin build. arq-worker must not enable that feature. Record the CI shape the contract requires: manylinux wheels for x86_64 and aarch64 via PyO3/maturin-action, two gh-action-pypi-publish calls split by filename prefix, and a clean-venv smoke test that installs arq-rs and arq-rs-worker at the same version and runs arq-worker --version plus python -c \"import arq_rs\". Do not add QueuePort, a storage trait, Lua, Redis Streams, or a second backend. Leave protocol, PyO3 behavior, and the supervisor loop to later tasks.",
+        "testStrategy": "cargo metadata shows the five members and the workspace version. The pyproject.toml matches the ADR 0008 maturin table. No crate yet depends on a storage trait. The smoke-test command is present as a documented or scripted check, not as a green run against unimplemented behavior.",
+        "subtasks": [],
+        "updatedAt": "2026-11-23T09:54:12.253Z"
+      },
+      {
+        "id": "2",
+        "title": "Implement sans-IO arq-core",
+        "description": "Put identifiers, ARQ_* config, outcome parsing, errors, and the lifecycle state machines in arq-core with no I/O.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          "1"
+        ],
+        "details": "arq-core depends only on std and serde. It must not depend on tokio, redis, pyo3, or the filesystem. Time and randomness are function arguments. Implement identifiers, Config from ARQ_* only, OutcomeProposal parsing, errors, AttemptLifecycle, AdmissionGate, SlotLifecycle, PingWatch, the operation plan, and postcondition checks. Config.from_env rejects any set SIMPLE_Q_* variable instead of ignoring it. Unparseable values, non-positive numbers where a positive number is required, and broken inequalities are startup errors. Defaults and inequalities are the table in docs/api.md: renew_interval_ms + renew_confirm_ms < lease_ms, receipt_ttl >= dead_ttl >= done_ttl, 0 < memory_soft_ratio < memory_hard_ratio < 1, and max_ready >= 1. Accepted outcomes are only ok, skipped, retry (delay_ms >= 0), and dead (non-empty reason, error string or null). Anything else, including a missing outcome, is invalid_outcome. A dispatch exception is dispatch_error and does not imply retry. AttemptLifecycle, AdmissionGate, and SlotLifecycle live here; a manifest row is closed only when the supervisor or child loop calls them and an integration test covers that call (ADR 0001). PingWatch observes loop responsiveness: asyncio.sleep must not consume the budget; a stuck loop thread does. Default ping budget is the task time limit plus 60s unless ARQ_PING_BUDGET_SECS is set (table default 1860). Unit tests of transitions, outcome parsing, and postconditions run with no Redis and no Python.",
+        "testStrategy": "cargo test -p arq-core passes without a Redis server and without initializing Python. A crate graph check shows no tokio, redis, or pyo3 edge. Table-driven cases cover the Config inequalities, SIMPLE_Q_* rejection, invalid_outcome, dispatch_error, and PingWatch budget rules from docs/api.md and docs/architecture.md.",
+        "subtasks": [],
+        "updatedAt": "2026-11-23T09:54:14.953Z"
+      },
+      {
+        "id": "3",
+        "title": "Implement RedisBackend in arq-redis",
+        "description": "Implement the concrete RedisBackend for WATCH / MULTI / EXEC, receipts, maintenance, admin, control, and the supervisor registry.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          "2"
+        ],
+        "details": "RedisBackend is a concrete type in arq-redis. Do not introduce QueuePort or a storage trait. The crate depends on arq-core, redis, and tokio. It performs enqueue, claim, renew, finish, requeue, and control (cancel, kill, settle), plus the maintenance batch, QueueAdmin reads, and the supervisor registry. Keys and hash fields follow docs/redis-keys.md: hash tag q:{queue}:... so one queue is one slot; unique_key and tag are outside the braces; the supervisor registry is outside the queue tag and outside the claim/finish transaction. Time source for lease, delay, and scores is Redis TIME in Unix milliseconds, captured at the start of the read cycle. Local clocks are not used for those values. Lost EXEC for enqueue, claim, renew, finish, requeue, and control is recovered by reading the receipt and postconditions; a retry with the same parameters must not create a second task, delivery, or cycle. The same operation_id with different parameters returns OperationConflict. A partial EXEC yields StorageInconsistency: that process stops writing the queue, the index is not self-healed, and uniq is not cleared. Connection drop or Cluster redirect before EXEC is sent starts the cycle over; if EXEC was sent and not read, use the unknown-outcome path. WATCH conflict retries for one task are capped by ARQ_WATCH_RETRIES. Empty RESP2 array and RESP3 null from EXEC are both WATCH conflicts. EXECABORT writes nothing and retries the cycle. The connection is closed after an error so the next command cannot land in the previous MULTI. Claim considers 16 candidates. After a confirmed claim, if a fresh Redis TIME is already at or past lease_deadline_ms, the handler is not called and the child exits 4. ARQ_MAX_READY rejects enqueue from ZCARD of the whole ready key, including scheduled members. renew and finish with a stale token or cycle_id do not change the task. started_at_ms stays the first delivery value across renew. cancel and kill of a ready task write the DLQ immediately. An inflight control command is stored, a normal finish is rejected, and a new claim does not create that delivery. settle during a live lease returns still_owned and does not change the hash. Tests run against Redis 8.6.2 and a Cluster redirect case, and they do not import Python.",
+        "testStrategy": "Integration tests against Redis 8.6.2 cover the protocol section of docs/testing.md and the transaction, lost-EXEC, partial-EXEC, retry/DLQ, and control sections of docs/operations.md. A Cluster test drops the connection on redirect. No test imports Python. Public fixtures use only process_item, default, item_id, item:<number>, batch-a, batch-b, and redis://redis:6379/0.",
+        "subtasks": [],
+        "updatedAt": "2026-11-23T11:07:18.546Z"
+      },
+      {
+        "id": "4",
+        "title": "Implement arq-pybridge and the arq_rs package",
+        "description": "Expose Client, QueueAdmin, QueueControl, dispatch, and the child interpreter through PyO3, and publish them as the arq-rs wheel.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          "3"
+        ],
+        "details": "arq-pybridge depends on arq-core, arq-redis, and pyo3. It provides the PyO3 Client, QueueAdmin, and QueueControl, the call into App.dispatch and note_dead, loop ping, and child-interpreter startup. The child interpreter is created with install_signal_handlers = 0. Signal handlers that restart a child are installed before Python init in that process. The parent supervisor does not initialize CPython; this crate is not linked into it. Importing the Python package must not open Redis; Client opens the connection. The Python surface is docs/api.md: actor() returns a frozen Actor, name defaults to the function name, duplicate names in one App raise ValueError, the handler is called as function(**kwargs), and lock_key, lock_ttl, and skip_on_lock raise TypeError. Loading is --app module:app or --app module:create_app --factory, and the factory runs inside the child. Middleware in a real child follows simple-q order: on_send, on_start, on_stop, and on_dead in registration order; around_dispatch enters outside-in and exits inside-out. on_send runs in the sender process before Redis. on_dead runs before dispatch returns and before the Redis commit (ADR 0004). Rust owns the commit of the outcome (ADR 0003). One on_dead error is logged, the other hooks still run, and the returned dict is unchanged. An on_start error is logged, later start hooks still run, and the child continues to claim. current_message() is visible to the outer around_dispatch and is None after success, exception, and cooperative cancel. Unknown actor yields unknown_actor and calls on_dead before commit. A suppressed cancel that returns a valid dict before cancel_grace_ms is committed; silence past the grace kills the child and does not finish. Python modules on the child path are dispatch, interfaces, message, backoff, metrics, tracing, tracking, exposition, and multiproc, adapted to the arq_rs names. memory.py stays an unexported test double. admin.py is rewritten to this contract's keys. The wheel is arq-rs built by maturin with extension-module. The crate type remains cdylib and rlib so arq-worker can depend on the rlib.",
+        "testStrategy": "Python hook tests that the contract assigns to the child run in a real child process, not only as an in-process dispatch call. Cover the Python section of docs/testing.md, including middleware order, on_dead before commit, invalid_outcome, and unknown_actor. Importing arq_rs does not open a socket. The extension-module feature is off unless the maturin build enables it.",
+        "subtasks": [],
+        "updatedAt": "2026-11-23T11:51:41.843Z"
+      },
+      {
+        "id": "5",
+        "title": "Implement the CPython-free arq-supervisor",
+        "description": "Implement the parent supervisor: slots, signals, memory limits, backoff, and metrics, with no dependency on arq-pybridge.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          "4"
+        ],
+        "details": "This task is sequenced after arq-pybridge so the child contract exists before the process loop is wired. The crate graph is not that sequence. arq-supervisor depends on arq-core, arq-redis, and watchexec-supervisor only. It must not depend on arq-pybridge directly or transitively, and cargo tree -p arq-supervisor -i pyo3 must be empty. The parent never initializes CPython. It arms SIGTERM and SIGINT before starting slots. Without pidfd_open the supervisor exits 3 and does not start slots. SIGTERM before slots removes the supervisor hash and its member in arq:supervisors, then exits. Child exit codes match docs/architecture.md: 0 replaces the slot immediately and resets backoff to 1s; 2 restarts with backoff and leaves inflight for lease recovery, with no Python on_stop and no finish; 3 stops the supervisor and does not restart the slot; 4 restarts with backoff and does not blindly repeat finish; 5 restarts with backoff. A connection error still inside the WATCH retry limit is not code 5. Backoff starts at 1s and doubles up to 30s, and it must not become a tight respawn loop. A short Redis outage uses that backoff. Shutdown with an active delivery keeps renewing, commits an outcome that finished in time, and calls on_stop. Shutdown timeout does not write an ACK. The supervisor stops new claims on that child before drain. A missed registry heartbeat does not clear uniq and does not return the task to ready. Heartbeat does not extend the lease. Memory and RSS use the cgroup ratios and optional child RSS byte thresholds from Config. Soft memory drains; hard memory kills. A soft signal must not hit a busy child. Exit 0 replaces the slot. Metrics are a separate tokio process, and the admin view after child death shows the exit code and does not leave an inflated in-progress gauge. SlotLifecycle and AdmissionGate in arq-core are called from this loop and covered by an integration test before their manifest rows are closed. One child runs one task at a time.",
+        "testStrategy": "cargo tree -p arq-supervisor -i pyo3 prints nothing. Process tests cover exit codes 0, 2, 3, 4, and 5, SIGTERM before slots, backoff from 1s to 30s, shutdown with an active delivery, and a missed heartbeat that leaves uniq in place. Tests do not import Python into the parent. Manifest rows for SlotLifecycle and AdmissionGate stay open until this loop calls them under an integration test.",
+        "subtasks": [],
+        "updatedAt": "2026-11-23T12:40:14.173Z"
+      },
+      {
+        "id": "6",
+        "title": "Implement the arq-worker binary and the arq-rs-worker wheel",
+        "description": "Add the CLI binary that is the only composition root, link it to libpython without extension-module, and build the worker wheel at the same version as arq-rs.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          "5"
+        ],
+        "details": "arq-worker is the binary and the CLI. Flags are --app module:app and --app module:create_app --factory. The factory runs inside the child and returns an App. This is the only crate that depends on all four of arq-core, arq-redis, arq-pybridge, and arq-supervisor. It depends on arq-pybridge as an rlib, does not enable extension-module, and links libpython. The parent supervisor path still must not initialize CPython; the child path does, with install_signal_handlers = 0, after the parent-death pidfd watch is armed. The published artifact is the arq-rs-worker wheel from a separate wheel-build script, using workspace.package.version, the same version as the arq-rs wheel. CI builds manylinux wheels for x86_64 and aarch64 and publishes the two distributions with separate gh-action-pypi-publish calls split by filename prefix. The smoke check installs both wheels into a clean venv and runs arq-worker --version and python -c \"import arq_rs\". A single combined wheel is not produced. Synthetic examples in this crate's tests use only the names allowed by docs/testing.md.",
+        "testStrategy": "The worker binary prints its version. A clean venv smoke test installs arq-rs and arq-rs-worker at one version and runs arq-worker --version and python -c \"import arq_rs\". cargo tree shows extension-module is not enabled for arq-worker, and cargo tree -p arq-supervisor -i pyo3 is still empty. --factory is executed in the child, not in the parent.",
+        "subtasks": [],
+        "updatedAt": "2026-11-23T12:59:18.056Z"
+      },
+      {
+        "id": "7",
+        "title": "Enforce the testing contract and a coverage gate above 93%",
+        "description": "Add the required Redis, process, Python, and control tests, and fail the build unless measured coverage is above 93%.",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [
+          "6"
+        ],
+        "details": "The gate is the last task and depends on the worker being in place so every crate is included. Coverage of the implementation must be above 93%. Meeting 93% exactly is not enough. The cases in docs/testing.md are mandatory and land with the behavior they describe; a green suite on old Apalis keys does not replace them. Include the Redis protocol cases (duplicate unique_key, lost EXEC, OperationConflict, StorageInconsistency, Cluster redirect, WATCH retry isolation, claim window of 16, expired lease before the handler, ARQ_MAX_READY), the delivery and process cases (SIGKILL before and after handler entry, max_deliveries versus max_retries, DLQ retention, requeue, overdue inflight, ping budget versus asyncio.sleep, shutdown, backoff, missed heartbeat, exit code 3 without pidfd_open, GIL past the ping budget), the Python child cases (middleware order, current_message, on_dead before commit, invalid_outcome, cancel grace, unknown_actor), and the control cases (cancel/kill, already_terminal, settle/still_owned, queue depth gauges, no automatic cancel-to-kill). arq-core tests open neither Redis nor Python. arq-redis tests do not import Python. cargo tree -p arq-supervisor -i pyo3 is empty. The repository check rejects an @actor whose function name is not process_item under docs/ and test fixtures. Fixtures and tests use only process_item, default, item_id, item:<number>, batch-a, batch-b, and redis://redis:6379/0. The clean-venv smoke test of both wheels remains part of this gate.",
+        "testStrategy": "The coverage command fails when coverage is less than or equal to 93% and passes only when coverage is above 93%. The docs/testing.md groups each have an executable test. Boundary checks fail if arq-core touches Redis or Python, if arq-redis imports Python, if arq-supervisor reaches pyo3, or if a fixture uses a handler name other than process_item.",
+        "subtasks": [],
+        "updatedAt": "2026-11-23T12:59:20.517Z"
+      }
+    ],
+    "metadata": {
+      "version": "1.0.0",
+      "lastModified": "2026-11-23T12:59:20.518Z",
+      "taskCount": 7,
+      "completedCount": 7,
+      "tags": [
+        "master"
+      ]
+    }
+  }
+}

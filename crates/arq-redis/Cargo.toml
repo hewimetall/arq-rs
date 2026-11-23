@@ -1,0 +1,17 @@
+[package]
+name = "arq-redis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "Concrete RedisBackend for arq-rs. No storage trait."
+
+[dependencies]
+arq-core = { workspace = true }
+redis = { workspace = true, features = ["tokio-comp", "aio", "connection-manager", "cluster"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "sync", "net"] }
+
+[dev-dependencies]
+redis = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
