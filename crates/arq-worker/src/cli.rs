@@ -468,4 +468,9 @@ mod tests {
         assert_eq!(redis_endpoint_label("unix:///tmp/redis.sock"), "redis");
         assert!(!redis_endpoint_label("redis://:secret@redis:6379/0").contains("secret"));
     }
+
+    #[test]
+    fn an_empty_queue_string_is_rejected() {
+        assert_eq!(split_queues("").unwrap_err(), "missing value for --queues");
+    }
 }
