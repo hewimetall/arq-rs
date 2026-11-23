@@ -45,14 +45,15 @@
         "id": "4",
         "title": "Implement arq-pybridge and the arq_rs package",
         "description": "Expose Client, QueueAdmin, QueueControl, dispatch, and the child interpreter through PyO3, and publish them as the arq-rs wheel.",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
         "dependencies": [
           "3"
         ],
         "details": "arq-pybridge depends on arq-core, arq-redis, and pyo3. It provides the PyO3 Client, QueueAdmin, and QueueControl, the call into App.dispatch and note_dead, loop ping, and child-interpreter startup. The child interpreter is created with install_signal_handlers = 0. Signal handlers that restart a child are installed before Python init in that process. The parent supervisor does not initialize CPython; this crate is not linked into it. Importing the Python package must not open Redis; Client opens the connection. The Python surface is docs/api.md: actor() returns a frozen Actor, name defaults to the function name, duplicate names in one App raise ValueError, the handler is called as function(**kwargs), and lock_key, lock_ttl, and skip_on_lock raise TypeError. Loading is --app module:app or --app module:create_app --factory, and the factory runs inside the child. Middleware in a real child follows simple-q order: on_send, on_start, on_stop, and on_dead in registration order; around_dispatch enters outside-in and exits inside-out. on_send runs in the sender process before Redis. on_dead runs before dispatch returns and before the Redis commit (ADR 0004). Rust owns the commit of the outcome (ADR 0003). One on_dead error is logged, the other hooks still run, and the returned dict is unchanged. An on_start error is logged, later start hooks still run, and the child continues to claim. current_message() is visible to the outer around_dispatch and is None after success, exception, and cooperative cancel. Unknown actor yields unknown_actor and calls on_dead before commit. A suppressed cancel that returns a valid dict before cancel_grace_ms is committed; silence past the grace kills the child and does not finish. Python modules on the child path are dispatch, interfaces, message, backoff, metrics, tracing, tracking, exposition, and multiproc, adapted to the arq_rs names. memory.py stays an unexported test double. admin.py is rewritten to this contract's keys. The wheel is arq-rs built by maturin with extension-module. The crate type remains cdylib and rlib so arq-worker can depend on the rlib.",
         "testStrategy": "Python hook tests that the contract assigns to the child run in a real child process, not only as an in-process dispatch call. Cover the Python section of docs/testing.md, including middleware order, on_dead before commit, invalid_outcome, and unknown_actor. Importing arq_rs does not open a socket. The extension-module feature is off unless the maturin build enables it.",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-23T11:51:41.843Z"
       },
       {
         "id": "5",
@@ -96,9 +97,9 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-23T11:07:18.546Z",
+      "lastModified": "2026-11-23T11:51:41.843Z",
       "taskCount": 7,
-      "completedCount": 3,
+      "completedCount": 4,
       "tags": [
         "master"
       ]

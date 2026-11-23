@@ -30,7 +30,9 @@ version = "0.1.0"
 dependencies = [
  "arq-core",
  "arq-redis",
+ "libc",
  "pyo3",
+ "tokio",
 ]
 
 [[package]]
