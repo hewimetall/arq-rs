@@ -1,6 +1,6 @@
 # Архитектура
 
-Статус: нормативный контракт от 2026-11-23. Код очереди в arq-rs ещё не написан.
+Статус: нормативный контракт от 2026-11-23. Код очереди лежит в крейтах `arq-core`, `arq-redis`, `arq-pybridge`, `arq-supervisor` и `arq-worker`. Расхождение с документом оформляется ADR.
 
 Источник execution runtime: `hewimetall/simple-redis-q` `483e9fc063103708bdf37bfe80ddbc91af2a2fd5`.
 
@@ -68,9 +68,9 @@ Workspace плоский: `crates/<имя>`, виртуальный корнев
 | Дистрибутив | Содержимое | Сборка |
 |---|---|---|
 | `arq-rs` | Python-пакет `arq_rs` и расширение `arq_rs._native` | `maturin` из корневого `pyproject.toml` |
-| `arq-rs-worker` | бинарник `arq-worker` | отдельный скрипт сборки wheel |
+| `arq-rs-worker` | бинарник `arq-worker` | `PyO3/maturin-action` по `crates/arq-worker`; локально — `scripts/build-worker-wheel.sh` |
 
-`arq-pybridge` имеет `crate-type = ["cdylib", "rlib"]`. Feature `extension-module` включает только сборка maturin. `arq-worker` этот feature не включает, линкуется с libpython и зависит от `arq-pybridge` как от rlib. CI собирает manylinux-wheel для `x86_64` и `aarch64`. Smoke-проверка в чистом venv ставит оба пакета одной версии и запускает `arq-worker --version` и `python -c "import arq_rs"`. Единый wheel не собирается.
+`arq-pybridge` имеет `crate-type = ["cdylib", "rlib"]`. Feature `extension-module` включает только сборка maturin. `arq-worker` этот feature не включает, линкуется с libpython и зависит от `arq-pybridge` как от rlib. `.github/workflows/wheels.yml` собирает оба wheel через `PyO3/maturin-action` для `x86_64` и `aarch64`. Публикация запускается после `release-gate` только push-событием аннотированного тега `v*` в GitHub Environment `pypi`. `workflow_dispatch` собирает wheel и запускает smoke. Этот запуск публикацию не включает. Обязательные ревьюеры среды `pypi` задаёт репозиторий. Создание тегов `v*` остаётся ограниченным мейнтейнерами. Smoke в чистом venv ставит оба пакета одной версии и запускает `arq-worker --version` и `python -c "import arq_rs"`. Единый wheel не собирается.
 
 ## Поток одной доставки
 
@@ -87,7 +87,7 @@ Workspace плоский: `crates/<имя>`, виртуальный корнев
 
 SHA зафиксирован: `483e9fc063103708bdf37bfe80ddbc91af2a2fd5`.
 
-Копирование файла без вызова из указанного пути не закрывает строку. Компонент со статусом «вне production-пути» требует отдельной интеграции в arq-rs и нового интеграционного теста. До этого он не считается перенесённым runtime.
+Копирование файла без вызова из указанного пути не закрывает строку. Компонент со статусом «вне production-пути» требует отдельной интеграции в arq-rs и нового интеграционного теста. До этого он не считается перенесённым runtime. Колонка «Статус у донора» описывает донора. Колонка «Куда входит в arq-rs» описывает вызовы этого репозитория.
 
 | Компонент | Символ донора | Кто вызывает у донора | Куда входит в arq-rs | Тесты донора | Новый тест | Статус у донора |
 |---|---|---|---|---|---|---|
@@ -104,9 +104,9 @@ SHA зафиксирован: `483e9fc063103708bdf37bfe80ddbc91af2a2fd5`.
 | Graceful drain | `request_graceful_drain`, pidfd родителя, `SIGUSR1` | `child::lifecycle` | `arq-supervisor` и child | `parent_exit_queue` | shutdown с активной доставкой | production |
 | Память и recycle | `plan_memory_signals`, `slot_busy`, `max_tasks_per_process` | цикл supervisor и child | `arq-supervisor` | `supervisor_tests` | soft signal не бьёт busy child; exit 0 заменяет слот | production |
 | Интроспекция | `simple_q_runtime::admin` записи child и supervisor | heartbeat supervisor | `QueueAdmin` в `arq-redis` | `admin` tests | gauges после смерти child | production как источник полей; ключи заменяются схемой arq-rs |
-| Attempt lifecycle | `simple_q_orchestration::AttemptLifecycle` | `worker::held_finish` собирает значение в момент finish | `arq-core`; вызывает child | unit-тесты `attempt.rs` | потеря владения во время handler | вне живого цикла: донор конструирует его локально при finish |
-| Drain gate | `AdmissionGate` | вызовов из `agent-worker` нет | `arq-core`; вход claim | unit-тесты `drain.rs` | drain не делает claim | вне production-пути |
-| Slot lifecycle | `simple_q_process::SlotLifecycle` | вызовов из `supervisor.rs` нет | `arq-core`; вызывает `arq-supervisor` | unit-тесты `lifecycle.rs` | supervisor проводит Ready/Drain/Reaped | вне production-пути |
+| Attempt lifecycle | `simple_q_orchestration::AttemptLifecycle` | `worker::held_finish` собирает значение в момент finish | `AttemptLifecycle` в `arq-core` (`src/attempt.rs`), unit-тесты `crates/arq-core/tests/machines.rs`. Цикл child и `arq-supervisor` событий не посылают. Строка открыта до такого вызова и интеграционного теста | unit-тесты `attempt.rs` | потеря владения во время handler | вне живого цикла: донор конструирует его локально при finish |
+| Drain gate | `AdmissionGate` | вызовов из `agent-worker` нет | `AdmissionGate` в `arq-core`. `arq-supervisor` вызывает его: `child.rs` проверяет `blocks_claim` перед claim, `supervisor.rs` закрывает ворота на drain вызовом `close_admission` | unit-тесты `drain.rs` | drain не делает claim | вне production-пути |
+| Slot lifecycle | `simple_q_process::SlotLifecycle` | вызовов из `supervisor.rs` нет | `SlotLifecycle` в `arq-core`. `supervise_slot` в `arq-supervisor` проводит его событиями `ProcessEvent` Ready, Drain, Stop, Reaped, Crash и StartFailed | unit-тесты `lifecycle.rs` | supervisor проводит Ready/Drain/Reaped | вне production-пути |
 | Старый транспорт | `simple_q_runtime::redis_api`, Apalis-ключи | worker донора | не переносится | `enqueue.rs` | новый протокол вместо этих тестов | production донора, исключён |
 | Sweeper донора | `cleanup::sweep_queue` | интервал в `child::run_child` | не переносится; retention делает maintenance batch | `cleanup_tests` | retention terminal-записей | production донора, исключён как recovery |
 | Business lock | `lock`, `acquire_lock` | dispatch и ping донора | не переносится | lock-тесты | `actor(lock_key=...)` даёт `TypeError` | production донора, исключён |

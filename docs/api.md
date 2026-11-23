@@ -1,6 +1,6 @@
 # Python API
 
-Статус: нормативный контракт от 2026-11-23. Сигнатуры ниже — поверхность, которую должна реализовать библиотека. Сейчас в репозитории этих модулей нет.
+Статус: нормативный контракт от 2026-11-23. Сигнатуры ниже остаются контрактом. Модули пакета лежат в `python/arq_rs`. Мост PyO3 — крейт `arq-pybridge`. Расхождение с документом оформляется ADR.
 
 Закреплённый ориентир: `simple_q.interfaces`, `simple_q.dispatch` и `docs/api.md` simple-q на SHA `483e9fc063103708bdf37bfe80ddbc91af2a2fd5`. Отличия собраны в [migration.md](migration.md).
 
@@ -380,6 +380,8 @@ class RequeueResult:
 | `ARQ_MAX_MESSAGE_BYTES` | 1048576 | UTF-8 JSON `kwargs` |
 | `ARQ_MAX_HEADERS_BYTES` | 65536 | сумма байт ключей и значений headers |
 | `ARQ_MAX_ERROR_BYTES` | 4096 | сохраняемый текст ошибки |
+
+`ARQ_MAX_MESSAGE_BYTES` ограничивает байты UTF-8 `kwargs`. Глубина JSON считается отдельно. `Json::parse` в `crates/arq-core` считает значение верхнего уровня за одно и отвергает документ глубже `MAX_JSON_DEPTH` = 64 с сообщением `nesting too deep`.
 
 Неравенства: `renew_interval_ms + renew_confirm_ms < lease_ms`, `receipt_ttl >= dead_ttl >= done_ttl`, `0 < memory_soft_ratio < memory_hard_ratio < 1`. Если заданы оба байтовых порога child, мягкий меньше жёсткого. `max_ready >= 1`.
 

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Зафиксирован нормативный контракт Redis-очереди и execution runtime. Реализация очереди в этот выпуск не входит.
+Выпуск содержит нормативный контракт Redis-очереди от 2026-11-23 и реализацию в `crates/` и `python/arq_rs`. Расхождение с документом оформляется ADR.
 
 Контракт определяет:
 
@@ -29,8 +29,20 @@
 - пропущенный heartbeat не снимает uniq, а `cancel` и `kill` не зависят от pubsub;
 - handler не стартует по потерянному ответу claim и не стартует, если lease уже истёк к повторному `TIME`.
 
-`QueuePort` не переносится. Транспорт — `RedisBackend` с операциями `enqueue`, `claim`, `renew`, `finish`, `requeue` и `control`. Отдельно подключать ещё нужно только `SlotLifecycle`, `AdmissionGate` и `AttemptLifecycle`.
+Реализация:
 
-Предложен ADR 0008. Workspace делится на `arq-core`, `arq-redis`, `arq-pybridge`, `arq-supervisor` и `arq-worker`. Ядро не зависит от сети, `tokio` и `pyo3`. `arq-supervisor` не зависит от `arq-pybridge`. Строка `Queue port` из manifest убрана.
+- Workspace состоит из `arq-core`, `arq-redis`, `arq-pybridge`, `arq-supervisor` и `arq-worker`. Ядро не зависит от сети, `tokio` и `pyo3`. `arq-supervisor` не зависит от `arq-pybridge`.
+- `QueuePort` не переносится. Транспорт — конкретный `RedisBackend` с операциями `enqueue`, `claim`, `renew`, `finish`, `requeue`, `cancel`, `kill` и `settle`.
+- Имена ключей очереди собирает `QueueKeys` в `arq-core`. `RedisBackend` пишет `ready`, `inflight`, `done`, `dead`, `dead:tag`, `job`, `uniq` и `receipt`. Реестр `arq:supervisors`, hash supervisor и hash child пишет `arq-supervisor`.
+- `supervise_slot` в `arq-supervisor` проводит `SlotLifecycle` событиями `ProcessEvent` Ready, Drain, Stop, Reaped, Crash и StartFailed.
+- `arq-supervisor` вызывает `AdmissionGate`: `child.rs` проверяет `blocks_claim` перед claim, `supervisor.rs` закрывает ворота на drain.
+- Пакет `python/arq_rs` содержит поверхность очереди. Имена `dramatiq_*` записывает `python/arq_rs/metrics.py`.
+- `Json::parse` отвергает вложенность глубже `MAX_JSON_DEPTH` = 64 и возвращает `nesting too deep`. Глубина от `ARQ_MAX_MESSAGE_BYTES` не зависит.
+- `.github/workflows/wheels.yml` собирает wheel `arq-rs` и `arq-rs-worker` через `PyO3/maturin-action` для `x86_64` и `aarch64`. Публикация идёт после job `release-gate` только на push аннотированного тега `v*`, в GitHub Environment `pypi`, с правами `id-token: write`, `contents: read` и `actions: read`. `workflow_dispatch` публикацию не включает. Обязательные ревьюеры среды `pypi` задаёт репозиторий. Создание тегов `v*` остаётся ограниченным мейнтейнерами. Smoke берёт `wheels-*-x86_64`, задаёт `SMOKE_ARCH=x86_64` и завершается при неоднозначном наборе wheel.
 
-Дистрибуция — два пакета одной версии: `arq-rs` и `arq-rs-worker`. Feature `extension-module` включает только maturin. Общий экспорт Rust-метрик `arq_*` и Python-метрик оставлен отдельному ADR.
+ADR 0008 принят 2026-11-23. Раздел крейтов и отказ от `QueuePort` уже стоят в `docs/architecture.md` и `docs/migration.md`.
+
+Открыто:
+
+- `AttemptLifecycle` реализован и покрыт unit-тестами в `arq-core`. Цикл child и `arq-supervisor` событий ему не посылают. Строка manifest остаётся открытой до этого вызова и интеграционного теста (ADR 0001, ADR 0008).
+- Ряды `arq_*` из `docs/observability.md` крейты Rust не выпускают. Общий multiprocess-экспорт с метриками Python задаёт отдельный ADR. Имена и labels контракта не меняются.

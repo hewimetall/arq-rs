@@ -1,6 +1,6 @@
 # Ключи Redis
 
-Статус: нормативный контракт от 2026-11-23. Этих ключей реализация ещё не создаёт.
+Статус: нормативный контракт от 2026-11-23. Имена ключей очереди собирает `QueueKeys` в `crates/arq-core/src/keys.rs`. `RedisBackend` пишет `q:{queue}:ready`, `inflight`, `done`, `dead`, `dead:tag`, `job`, `uniq` и `receipt`. Реестр `arq:supervisors`, hash `arq:supervisor:{hostname}.{pid}` и hash `arq:supervisor:{hostname}.{pid}:child:{slot}` пишет `arq-supervisor` через `RedisBackend`. Расхождение с документом оформляется ADR.
 
 ## Hash slot
 

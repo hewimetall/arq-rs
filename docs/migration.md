@@ -80,6 +80,10 @@ Scores и поля времени — Unix-миллисекунды от Redis `
 
 Донор выпускает два wheel. arq-rs делает то же: `arq-rs` несёт пакет `arq_rs` и расширение `arq_rs._native`, `arq-rs-worker` несёт бинарник `arq-worker`. Версия обоих берётся из `workspace.package.version`. Feature `extension-module` включает только сборка расширения. Бинарник линкуется с libpython.
 
-## Runtime, который ещё надо подключить
+## Стейт-машины runtime
 
-`SlotLifecycle` и `AdmissionGate` на SHA донора supervisor loop не вызывает. `AttemptLifecycle` у донора собирается локально в момент finish. В arq-rs все три типа живут в `arq-core`. Они считаются перенесёнными, только когда их вызывает цикл `arq-supervisor` или child и это покрыто интеграционным тестом. Наличие этих типов в дереве simple-q само по себе runtime не переносит. Строки manifest в [architecture.md](architecture.md) закрываются только этим тестом.
+`SlotLifecycle` и `AdmissionGate` на SHA донора supervisor loop не вызывает. `AttemptLifecycle` у донора собирается локально в момент finish. В arq-rs все три типа живут в `arq-core`. Наличие этих типов в дереве simple-q само по себе runtime не переносит.
+
+`supervise_slot` в `arq-supervisor` проводит `SlotLifecycle` событиями `ProcessEvent` Ready, Drain, Stop, Reaped, Crash и StartFailed. `arq-supervisor` вызывает `AdmissionGate`: `supervisor.rs` закрывает ворота на drain, `child.rs` проверяет `blocks_claim` перед claim. Колонка «Статус у донора» в manifest описывает донора.
+
+`AttemptLifecycle` покрыт unit-тестами `crates/arq-core/tests/machines.rs`. Цикл child и `arq-supervisor` событий ему не посылают. Строка manifest в [architecture.md](architecture.md) остаётся открытой, пока один из этих циклов не проведёт машину и интеграционный тест не покроет вызов (ADR 0001, ADR 0008).
