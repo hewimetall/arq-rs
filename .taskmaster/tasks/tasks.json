@@ -31,14 +31,15 @@
         "id": "3",
         "title": "Implement RedisBackend in arq-redis",
         "description": "Implement the concrete RedisBackend for WATCH / MULTI / EXEC, receipts, maintenance, admin, control, and the supervisor registry.",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
         "dependencies": [
           "2"
         ],
         "details": "RedisBackend is a concrete type in arq-redis. Do not introduce QueuePort or a storage trait. The crate depends on arq-core, redis, and tokio. It performs enqueue, claim, renew, finish, requeue, and control (cancel, kill, settle), plus the maintenance batch, QueueAdmin reads, and the supervisor registry. Keys and hash fields follow docs/redis-keys.md: hash tag q:{queue}:... so one queue is one slot; unique_key and tag are outside the braces; the supervisor registry is outside the queue tag and outside the claim/finish transaction. Time source for lease, delay, and scores is Redis TIME in Unix milliseconds, captured at the start of the read cycle. Local clocks are not used for those values. Lost EXEC for enqueue, claim, renew, finish, requeue, and control is recovered by reading the receipt and postconditions; a retry with the same parameters must not create a second task, delivery, or cycle. The same operation_id with different parameters returns OperationConflict. A partial EXEC yields StorageInconsistency: that process stops writing the queue, the index is not self-healed, and uniq is not cleared. Connection drop or Cluster redirect before EXEC is sent starts the cycle over; if EXEC was sent and not read, use the unknown-outcome path. WATCH conflict retries for one task are capped by ARQ_WATCH_RETRIES. Empty RESP2 array and RESP3 null from EXEC are both WATCH conflicts. EXECABORT writes nothing and retries the cycle. The connection is closed after an error so the next command cannot land in the previous MULTI. Claim considers 16 candidates. After a confirmed claim, if a fresh Redis TIME is already at or past lease_deadline_ms, the handler is not called and the child exits 4. ARQ_MAX_READY rejects enqueue from ZCARD of the whole ready key, including scheduled members. renew and finish with a stale token or cycle_id do not change the task. started_at_ms stays the first delivery value across renew. cancel and kill of a ready task write the DLQ immediately. An inflight control command is stored, a normal finish is rejected, and a new claim does not create that delivery. settle during a live lease returns still_owned and does not change the hash. Tests run against Redis 8.6.2 and a Cluster redirect case, and they do not import Python.",
         "testStrategy": "Integration tests against Redis 8.6.2 cover the protocol section of docs/testing.md and the transaction, lost-EXEC, partial-EXEC, retry/DLQ, and control sections of docs/operations.md. A Cluster test drops the connection on redirect. No test imports Python. Public fixtures use only process_item, default, item_id, item:<number>, batch-a, batch-b, and redis://redis:6379/0.",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-23T11:07:18.546Z"
       },
       {
         "id": "4",
@@ -95,9 +96,9 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-23T09:54:14.953Z",
+      "lastModified": "2026-11-23T11:07:18.546Z",
       "taskCount": 7,
-      "completedCount": 2,
+      "completedCount": 3,
       "tags": [
         "master"
       ]

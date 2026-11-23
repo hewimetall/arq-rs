@@ -1,21 +1,25 @@
-//! Concrete Redis adapter. The `WATCH / MULTI / EXEC` cycle is not implemented yet.
+//! Concrete Redis adapter.
 //!
-//! `RedisBackend` is a struct, not a trait. There is no `QueuePort`.
+//! `RedisBackend` executes the plans from `arq-core`. It is a struct, not a trait.
+//! There is no `QueuePort` and no storage trait.
 
-/// Placeholder for the Redis execution adapter.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct RedisBackend;
+#![forbid(unsafe_code)]
 
-impl RedisBackend {
-    pub const fn new() -> Self {
-        Self
-    }
+mod backend;
+mod error;
+mod observe;
+mod resp;
+mod session;
+mod types;
 
-    /// Names the driver types this crate is built against. The protocol is not called.
-    pub fn driver() -> (&'static str, &'static str) {
-        (
-            std::any::type_name::<redis::Client>(),
-            std::any::type_name::<tokio::runtime::Runtime>(),
-        )
-    }
-}
+#[cfg(test)]
+mod scripted;
+
+pub use backend::{QueueAdmin, RedisBackend};
+pub use error::BackendError;
+pub use types::{
+    ChildRegistration, ChildView, ClaimRequest, ClaimResult, ControlRequest, ControlResult, Delivery, EnqueueJob,
+    EnqueueResult, ExecFault, Fault, FinishRequest, FinishResult, MaintenanceReport, PeekState, QueueDepth,
+    RenewRequest, RenewResult, RequeueRequest, RequeueResult, Snapshot, StoredReceipt, SupervisorRegistration,
+    SupervisorView, TaskInfo, TaskPage,
+};

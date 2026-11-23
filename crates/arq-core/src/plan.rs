@@ -696,7 +696,17 @@ pub fn plan_finish(input: &FinishInput<'_>) -> FinishDecision {
         Gate::Corrupt(error) => return FinishDecision::Inconsistent(error),
         Gate::Conflict(error) => return FinishDecision::Conflict(error),
         Gate::Same(_) => {
-            return if check_finish(&proof, input.observed).is_ok() {
+            // A stored retry receipt is proved against the post-increment counter.
+            // `applied` was built from that counter, so the replay proof steps back one.
+            let replay_proof = match &applied.shape {
+                FinishShape::Retry { .. } => {
+                    let before = input.observed.retries.saturating_sub(1);
+                    let replayed = applied_finish(input.proposal, before, input.config.max_error_bytes as usize);
+                    finish_proof(input, &replayed, None)
+                }
+                _ => proof,
+            };
+            return if check_finish(&replay_proof, input.observed).is_ok() {
                 FinishDecision::Replay(Replay { status: ReceiptStatus::Finished, proved_without_receipt: false })
             } else {
                 FinishDecision::Inconsistent(bad(input.queue, input.operation_id, "finish receipt contradicts postconditions"))
