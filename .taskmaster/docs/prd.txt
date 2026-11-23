@@ -1,0 +1,19 @@
+arq-rs implementation PRD
+
+Implementation must follow the normative contract in /workspace/docs. A rule in those documents is the behavior to build. It is not evidence that the behavior already exists. Do not edit the contract files in docs/ while implementing this list. Do not call an external LLM to re-parse this PRD.
+
+Workspace shape is ADR 0008. The Cargo workspace is flat: crates/<name>, a virtual root Cargo.toml, and shared versions in [workspace.package] and [workspace.dependencies]. Crates, and the order they are implemented:
+
+1. arq-core — identifiers, Config (ARQ_* only), OutcomeProposal parsing, errors, AttemptLifecycle, AdmissionGate, SlotLifecycle, PingWatch, the operation plan, and postcondition checks. Dependencies are only std and serde. No tokio, redis, pyo3, or filesystem. Time and randomness arrive as arguments.
+2. arq-redis — the concrete RedisBackend. No QueuePort and no storage trait. It owns WATCH / MULTI / EXEC, receipts, the maintenance batch, QueueAdmin, QueueControl, and the supervisor registry. It depends on arq-core, redis, and tokio.
+3. arq-pybridge — PyO3 Client, QueueAdmin, QueueControl, App.dispatch, note_dead, loop ping, and child-interpreter startup. It is published as the arq-rs wheel (package arq_rs, extension arq_rs._native).
+4. arq-supervisor — parent process with no CPython: slots, watchexec-supervisor, signals, memory and RSS, backoff, and the metrics helper. It depends on arq-core, arq-redis, and watchexec-supervisor. It must not depend on arq-pybridge, directly or transitively. cargo tree -p arq-supervisor -i pyo3 is empty.
+5. arq-worker — the binary and CLI (--app, --factory) and the only crate that assembles all four. It is published as the arq-rs-worker wheel. It links libpython and does not enable the extension-module feature.
+
+Redis is the only store. Supported server is Redis 8.6.2, including Cluster. The protocol uses TIME, strings, hashes, sorted sets, and WATCH / MULTI / EXEC. Lua and Redis Streams are out of the protocol. All keys of one queue share one hash slot. The supervisor registry is not in that slot and is not part of the claim or finish transaction.
+
+Two distributions of one workspace.package.version are published: arq-rs (maturin, from the root pyproject.toml, feature extension-module) and arq-rs-worker (separate wheel build). A clean-venv smoke test installs both packages at the same version and runs arq-worker --version and python -c "import arq_rs".
+
+Coverage of the implementation must be above 93%. The cases in /workspace/docs/testing.md are required with the behavior they describe. arq-core tests do not open Redis and do not initialize Python. arq-redis tests do not import Python. Public examples, fixtures, and tests use only these names: handler process_item, queue default, argument item_id, unique key item:<number>, tag batch-a or batch-b, URL redis://redis:6379/0.
+
+Out of scope for the library: a scheduler, a workflow engine, a DI container, business locks, and coordination of external transactions. SIMPLE_Q_* in the environment is a startup error. A second storage backend requires a new ADR.

@@ -1,0 +1,13 @@
+[package]
+name = "arq-supervisor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "CPython-free parent supervisor for arq-rs."
+
+[dependencies]
+arq-core = { workspace = true }
+arq-redis = { workspace = true }
+watchexec-supervisor = { workspace = true }

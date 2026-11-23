@@ -1,0 +1,11 @@
+[package]
+name = "arq-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "Sans-IO identifiers, config, outcomes, and queue protocol for arq-rs."
+
+[dependencies]
+serde = { workspace = true }

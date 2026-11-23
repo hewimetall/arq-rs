@@ -1,0 +1,24 @@
+agent-lsp MCP note
+
+agent-lsp init --non-interactive writes Claude Code project config (.mcp.json). It does not configure Cursor, so it was not run. Nothing was written under ~/.cursor.
+
+Cursor project config, when you want it, is .cursor/mcp.json:
+
+{
+  "mcpServers": {
+    "agent-lsp": {
+      "command": "agent-lsp",
+      "args": []
+    }
+  }
+}
+
+Empty args auto-detect language servers on PATH. Installed commands:
+
+- /usr/local/bin/agent-lsp (0.24.4)
+- /usr/local/bin/pyright and /usr/local/bin/pyright-langserver (pyright 1.1.414, package under /home/ubuntu/.local/lib/node_modules/pyright)
+- /usr/local/cargo/bin/rust-analyzer (rustup shim; component rust-analyzer 1.83.0 on toolchain 1.83.0-x86_64-unknown-linux-gnu)
+
+Explicit args if auto-detect is not wanted:
+
+agent-lsp rust:rust-analyzer python:pyright-langserver,--stdio

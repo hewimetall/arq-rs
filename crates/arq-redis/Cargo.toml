@@ -1,0 +1,13 @@
+[package]
+name = "arq-redis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "Concrete RedisBackend for arq-rs. No storage trait."
+
+[dependencies]
+arq-core = { workspace = true }
+redis = { workspace = true }
+tokio = { workspace = true }

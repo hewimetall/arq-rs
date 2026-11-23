@@ -1,0 +1,21 @@
+[package]
+name = "arq-pybridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "PyO3 bridge for arq-rs. The extension module is not implemented yet."
+
+[lib]
+name = "arq_pybridge"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+arq-core = { workspace = true }
+arq-redis = { workspace = true }
+pyo3 = { workspace = true }

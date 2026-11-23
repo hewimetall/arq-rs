@@ -1,0 +1,80 @@
+name: wheels
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  arq-rs:
+    name: arq-rs manylinux (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: auto
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-arq-rs-${{ matrix.target }}
+          path: dist/*
+
+  arq-rs-worker:
+    name: arq-rs-worker manylinux (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the worker wheel without extension-module
+        run: scripts/build-worker-wheel.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-arq-rs-worker-${{ matrix.target }}
+          path: dist/*
+
+  publish:
+    name: publish both distributions
+    needs: [arq-rs, arq-rs-worker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: wheels-*
+          merge-multiple: true
+      - name: Split wheels by filename prefix
+        run: |
+          mkdir -p dist/arq-rs dist/arq-rs-worker
+          find artifacts -type f -name 'arq_rs_worker-*' -exec cp {} dist/arq-rs-worker/ \;
+          find artifacts -type f -name 'arq_rs-*' ! -name 'arq_rs_worker-*' -exec cp {} dist/arq-rs/ \;
+      - name: Publish arq-rs
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/arq-rs
+      - name: Publish arq-rs-worker
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/arq-rs-worker
+
+  smoke:
+    name: clean venv smoke
+    needs: [arq-rs, arq-rs-worker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: wheels-*
+          merge-multiple: true
+      - name: Install both wheels of one version and import them
+        run: scripts/smoke-venv.sh artifacts

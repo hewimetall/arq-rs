@@ -1,0 +1,18 @@
+[package]
+name = "arq-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "arq-rs worker binary. Links libpython and does not enable extension-module."
+
+[[bin]]
+name = "arq-worker"
+path = "src/main.rs"
+
+[dependencies]
+arq-core = { workspace = true }
+arq-redis = { workspace = true }
+arq-pybridge = { workspace = true }
+arq-supervisor = { workspace = true }

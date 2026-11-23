@@ -1,0 +1,10 @@
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+manifest-path = "crates/arq-pybridge/Cargo.toml"
+features = ["extension-module"]
+python-source = "python"
+python-packages = ["arq_rs"]
+module-name = "arq_rs._native"
