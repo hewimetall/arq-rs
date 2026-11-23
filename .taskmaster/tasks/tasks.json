@@ -73,34 +73,36 @@
         "id": "6",
         "title": "Implement the arq-worker binary and the arq-rs-worker wheel",
         "description": "Add the CLI binary that is the only composition root, link it to libpython without extension-module, and build the worker wheel at the same version as arq-rs.",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
         "dependencies": [
           "5"
         ],
         "details": "arq-worker is the binary and the CLI. Flags are --app module:app and --app module:create_app --factory. The factory runs inside the child and returns an App. This is the only crate that depends on all four of arq-core, arq-redis, arq-pybridge, and arq-supervisor. It depends on arq-pybridge as an rlib, does not enable extension-module, and links libpython. The parent supervisor path still must not initialize CPython; the child path does, with install_signal_handlers = 0, after the parent-death pidfd watch is armed. The published artifact is the arq-rs-worker wheel from a separate wheel-build script, using workspace.package.version, the same version as the arq-rs wheel. CI builds manylinux wheels for x86_64 and aarch64 and publishes the two distributions with separate gh-action-pypi-publish calls split by filename prefix. The smoke check installs both wheels into a clean venv and runs arq-worker --version and python -c \"import arq_rs\". A single combined wheel is not produced. Synthetic examples in this crate's tests use only the names allowed by docs/testing.md.",
         "testStrategy": "The worker binary prints its version. A clean venv smoke test installs arq-rs and arq-rs-worker at one version and runs arq-worker --version and python -c \"import arq_rs\". cargo tree shows extension-module is not enabled for arq-worker, and cargo tree -p arq-supervisor -i pyo3 is still empty. --factory is executed in the child, not in the parent.",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-23T12:59:18.056Z"
       },
       {
         "id": "7",
         "title": "Enforce the testing contract and a coverage gate above 93%",
         "description": "Add the required Redis, process, Python, and control tests, and fail the build unless measured coverage is above 93%.",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
         "dependencies": [
           "6"
         ],
         "details": "The gate is the last task and depends on the worker being in place so every crate is included. Coverage of the implementation must be above 93%. Meeting 93% exactly is not enough. The cases in docs/testing.md are mandatory and land with the behavior they describe; a green suite on old Apalis keys does not replace them. Include the Redis protocol cases (duplicate unique_key, lost EXEC, OperationConflict, StorageInconsistency, Cluster redirect, WATCH retry isolation, claim window of 16, expired lease before the handler, ARQ_MAX_READY), the delivery and process cases (SIGKILL before and after handler entry, max_deliveries versus max_retries, DLQ retention, requeue, overdue inflight, ping budget versus asyncio.sleep, shutdown, backoff, missed heartbeat, exit code 3 without pidfd_open, GIL past the ping budget), the Python child cases (middleware order, current_message, on_dead before commit, invalid_outcome, cancel grace, unknown_actor), and the control cases (cancel/kill, already_terminal, settle/still_owned, queue depth gauges, no automatic cancel-to-kill). arq-core tests open neither Redis nor Python. arq-redis tests do not import Python. cargo tree -p arq-supervisor -i pyo3 is empty. The repository check rejects an @actor whose function name is not process_item under docs/ and test fixtures. Fixtures and tests use only process_item, default, item_id, item:<number>, batch-a, batch-b, and redis://redis:6379/0. The clean-venv smoke test of both wheels remains part of this gate.",
         "testStrategy": "The coverage command fails when coverage is less than or equal to 93% and passes only when coverage is above 93%. The docs/testing.md groups each have an executable test. Boundary checks fail if arq-core touches Redis or Python, if arq-redis imports Python, if arq-supervisor reaches pyo3, or if a fixture uses a handler name other than process_item.",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-23T12:59:20.517Z"
       }
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-23T12:40:14.173Z",
+      "lastModified": "2026-11-23T12:59:20.518Z",
       "taskCount": 7,
-      "completedCount": 5,
+      "completedCount": 7,
       "tags": [
         "master"
       ]

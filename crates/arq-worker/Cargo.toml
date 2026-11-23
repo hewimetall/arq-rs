@@ -7,6 +7,10 @@ publish.workspace = true
 rust-version.workspace = true
 description = "arq-rs worker binary. Links libpython and does not enable extension-module."
 
+[lib]
+name = "arq_worker"
+path = "src/lib.rs"
+
 [[bin]]
 name = "arq-worker"
 path = "src/main.rs"
@@ -16,3 +20,5 @@ arq-core = { workspace = true }
 arq-redis = { workspace = true }
 arq-pybridge = { workspace = true }
 arq-supervisor = { workspace = true }
+pyo3 = { workspace = true }
+tokio = { workspace = true, features = ["rt", "signal", "time"] }

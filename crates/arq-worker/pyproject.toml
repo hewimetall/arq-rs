@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[project]
+name = "arq-rs-worker"
+dynamic = ["version"]
+description = "arq-worker supervisor binary for arq-rs"
+requires-python = ">=3.12"
+# Kept equal to workspace.package.version. scripts/build-worker-wheel.sh checks this pin.
+dependencies = ["arq-rs==0.1.0"]
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "Cargo.toml"

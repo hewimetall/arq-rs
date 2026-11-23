@@ -32,6 +32,7 @@ target/
 dist/
 *.egg-info/
 .venv/
+.venv-maturin/
 __pycache__/
 *.pyc
 .coverage

@@ -63,6 +63,8 @@ dependencies = [
  "arq-pybridge",
  "arq-redis",
  "arq-supervisor",
+ "pyo3",
+ "tokio",
 ]
 
 [[package]]
