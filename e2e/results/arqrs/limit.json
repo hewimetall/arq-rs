@@ -1,0 +1,25 @@
+{
+  "library": "arqrs",
+  "scenario": "limit",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:12.738270+00:00",
+  "measured": true,
+  "status": "failed",
+  "attempts": 2,
+  "notes": [
+    "traceparent:00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "traceparent:00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "failed:timeout deliveries=2 retries=1"
+  ],
+  "stop": [
+    {
+      "sigterm_at": 1795510276.5762227,
+      "exit_at": 1795510276.7763832,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 4.038
+}

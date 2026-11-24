@@ -1,0 +1,31 @@
+{
+  "library": "arqrs",
+  "scenario": "chain",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:01.044540+00:00",
+  "measured": true,
+  "send": {
+    "accepted": true,
+    "id": "28ccfff4-e4cc-49a8-8ae2-6dd2e6a8d6f0",
+    "unique_key": "chain:chain-arqrs-1795510261:0",
+    "unique_key_raw": "chain:chain-arqrs-1795510261:0"
+  },
+  "steps": 4,
+  "rows": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "stop": [
+    {
+      "sigterm_at": 1795510263.973968,
+      "exit_at": 1795510264.1741052,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 3.13
+}

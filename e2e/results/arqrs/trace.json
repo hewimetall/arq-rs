@@ -1,0 +1,21 @@
+{
+  "library": "arqrs",
+  "scenario": "trace",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:18.086855+00:00",
+  "measured": true,
+  "notes": [
+    "traceparent:00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+  ],
+  "stop": [
+    {
+      "sigterm_at": 1795510278.9129677,
+      "exit_at": 1795510279.113114,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 1.026
+}

@@ -1,0 +1,58 @@
+{
+  "library": "arqrs",
+  "scenario": "five_kills",
+  "scale": "short",
+  "started_at": "2026-11-24T09:02:28.451751+00:00",
+  "measured": true,
+  "kills": [
+    {
+      "i": 0,
+      "saw_attempt": true,
+      "kill_at": 1795510949.2781026
+    },
+    {
+      "i": 1,
+      "saw_attempt": true,
+      "kill_at": 1795510987.6347861
+    },
+    {
+      "i": 2,
+      "saw_attempt": true,
+      "kill_at": 1795511025.9791522
+    },
+    {
+      "i": 3,
+      "saw_attempt": true,
+      "kill_at": 1795511064.6131685
+    },
+    {
+      "i": 4,
+      "saw_attempt": true,
+      "kill_at": 1795511103.2483447
+    }
+  ],
+  "status": "running",
+  "fail_reason": null,
+  "attempt_notes": [
+    "poison retries=0 deliveries=1 id=ade85a09-737f-444b-89f5-540c803986df",
+    "poison retries=0 deliveries=2 id=ade85a09-737f-444b-89f5-540c803986df",
+    "poison retries=0 deliveries=3 id=ade85a09-737f-444b-89f5-540c803986df",
+    "poison retries=0 deliveries=4 id=ade85a09-737f-444b-89f5-540c803986df",
+    "poison retries=0 deliveries=5 id=ade85a09-737f-444b-89f5-540c803986df"
+  ],
+  "env": {
+    "SIMPLE_Q_HEARTBEAT_SECS": "5",
+    "SIMPLE_Q_MISSED_HEARTBEATS": "2"
+  },
+  "stop": [
+    {
+      "sigterm_at": 1795511123.6701648,
+      "exit_at": 1795511123.8702912,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 175.419
+}

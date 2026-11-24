@@ -1,0 +1,26 @@
+{
+  "library": "arqrs",
+  "scenario": "boom",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:11.394626+00:00",
+  "measured": true,
+  "status": "failed",
+  "attempts": 3,
+  "notes": [
+    "traceparent:00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "traceparent:00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "traceparent:00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "failed:retries deliveries=3 retries=2"
+  ],
+  "stop": [
+    {
+      "sigterm_at": 1795510272.520412,
+      "exit_at": 1795510272.7205496,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 1.326
+}

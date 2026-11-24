@@ -1,0 +1,39 @@
+{
+  "library": "arqrs",
+  "scenario": "sigkill",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:29.872943+00:00",
+  "measured": true,
+  "kill_at": 1795510290.5981283,
+  "gap": {
+    "gap_s": 5.803944681213379,
+    "starts_after": 1
+  },
+  "attempts": [
+    {
+      "item": 0,
+      "note": "block-start retries=0 deliveries=1 id=7ee899d3-2278-4b9b-9a03-798eff50a68f",
+      "ts": "1795510290.400830"
+    },
+    {
+      "item": 1,
+      "note": "block-end retries=0 deliveries=1 id=7ee899d3-2278-4b9b-9a03-798eff50a68f",
+      "ts": "1795510296.402073"
+    }
+  ],
+  "heartbeat_env": {
+    "SIMPLE_Q_HEARTBEAT_SECS": "5",
+    "SIMPLE_Q_MISSED_HEARTBEATS": "2"
+  },
+  "stop": [
+    {
+      "sigterm_at": 1795510305.0309248,
+      "exit_at": 1795510305.2311249,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 15.358
+}

@@ -1,0 +1,58 @@
+{
+  "library": "arqrs",
+  "scenario": "periodic",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:16.803236+00:00",
+  "measured": true,
+  "sends": [
+    {
+      "accepted": true,
+      "id": "9ad5a77b-cc43-4c53-b00a-13046bf14af0",
+      "unique_key": "periodic:periodic-arqrs-1795510276",
+      "unique_key_raw": "periodic:periodic-arqrs-1795510276"
+    },
+    {
+      "accepted": true,
+      "id": "0b5410cf-9b00-4fad-a66b-0b3e7c085448",
+      "unique_key": "periodic:periodic-arqrs-1795510276",
+      "unique_key_raw": "periodic:periodic-arqrs-1795510276"
+    },
+    {
+      "accepted": true,
+      "id": "4c8d671a-3014-40f7-a369-8d70e79f9bd5",
+      "unique_key": "periodic:periodic-arqrs-1795510276",
+      "unique_key_raw": "periodic:periodic-arqrs-1795510276"
+    },
+    {
+      "accepted": true,
+      "id": "1f78d9ee-ee40-4ca3-8d62-2430ecb867a7",
+      "unique_key": "periodic:periodic-arqrs-1795510276",
+      "unique_key_raw": "periodic:periodic-arqrs-1795510276"
+    }
+  ],
+  "got": 1,
+  "invariant": {
+    "expected": 1,
+    "lost": 0,
+    "duplicated": 1,
+    "attempts": 3,
+    "distinct_items": 1,
+    "progress_steps": 0,
+    "skips": 0,
+    "status": "done",
+    "fail_reason": null,
+    "cancelled": false,
+    "expected_n": 1
+  },
+  "stop": [
+    {
+      "sigterm_at": 1795510277.872215,
+      "exit_at": 1795510278.072343,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 1.269
+}

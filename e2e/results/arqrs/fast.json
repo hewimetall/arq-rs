@@ -1,0 +1,40 @@
+{
+  "library": "arqrs",
+  "scenario": "fast",
+  "scale": "short",
+  "started_at": "2026-11-24T09:02:06.726177+00:00",
+  "measured": true,
+  "sent": {
+    "accepted": 80,
+    "rejected": 0,
+    "seconds": 0.127,
+    "sample_ids": [
+      "f0e85068-02ff-49e9-a4af-1669dfef74e0",
+      "5acdf753-8e7c-4503-aaa7-6a53c8603377",
+      "088dbb52-3cda-4dde-b5f6-adaa4e2e0ac4"
+    ],
+    "native_dedup": false
+  },
+  "done": 80,
+  "elapsed_s": 2.242,
+  "throughput_per_s": 35.68,
+  "latency_ms": {
+    "n": 80,
+    "p50": 1004,
+    "p99": 1898,
+    "max": 1946
+  },
+  "idle_rss": 105058304,
+  "load_rss_peak": 105517056,
+  "stop": [
+    {
+      "sigterm_at": 1795510932.5855649,
+      "exit_at": 1795510932.7857049,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 6.06
+}

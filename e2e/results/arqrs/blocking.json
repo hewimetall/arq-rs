@@ -1,0 +1,36 @@
+{
+  "library": "arqrs",
+  "scenario": "blocking",
+  "scale": "short",
+  "started_at": "2026-11-24T08:52:15.697028+00:00",
+  "measured": true,
+  "elapsed_s": 12.121,
+  "block_s": 4,
+  "env": {
+    "SIMPLE_Q_HEARTBEAT_SECS": "5",
+    "SIMPLE_Q_MISSED_HEARTBEATS": "2"
+  },
+  "attempts": [
+    {
+      "item": 0,
+      "note": "block-start retries=0 deliveries=1 id=2c8cb107-ad39-4d7f-b4e1-f5d65a30b249",
+      "ts": "1795510336.222554"
+    },
+    {
+      "item": 1,
+      "note": "block-end retries=0 deliveries=1 id=2c8cb107-ad39-4d7f-b4e1-f5d65a30b249",
+      "ts": "1795510340.223682"
+    }
+  ],
+  "stop": [
+    {
+      "sigterm_at": 1795510348.2263107,
+      "exit_at": 1795510348.426424,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 12.729
+}

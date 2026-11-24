@@ -1,0 +1,40 @@
+{
+  "library": "arqrs",
+  "scenario": "recycle",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:27.928952+00:00",
+  "measured": true,
+  "got": 12,
+  "pids": [
+    105882,
+    105905,
+    105918,
+    105931,
+    105944
+  ],
+  "invariant": {
+    "expected": 12,
+    "lost": 0,
+    "duplicated": 0,
+    "attempts": 12,
+    "distinct_items": 12,
+    "progress_steps": 0,
+    "skips": 0,
+    "status": "done",
+    "fail_reason": null,
+    "cancelled": false,
+    "expected_n": 12
+  },
+  "native": true,
+  "stop": [
+    {
+      "sigterm_at": 1795510289.6600344,
+      "exit_at": 1795510289.8601546,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 1.931
+}

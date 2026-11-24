@@ -1,0 +1,37 @@
+{
+  "library": "arqrs",
+  "scenario": "parallel",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:26.847230+00:00",
+  "measured": true,
+  "seconds": 0.454,
+  "got": 8,
+  "pids": [
+    105830,
+    105831
+  ],
+  "invariant": {
+    "expected": 8,
+    "lost": 0,
+    "duplicated": 0,
+    "attempts": 8,
+    "distinct_items": 8,
+    "progress_steps": 0,
+    "skips": 0,
+    "status": "done",
+    "fail_reason": null,
+    "cancelled": false,
+    "expected_n": 8
+  },
+  "stop": [
+    {
+      "sigterm_at": 1795510287.7145157,
+      "exit_at": 1795510287.9146695,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 1.067
+}
