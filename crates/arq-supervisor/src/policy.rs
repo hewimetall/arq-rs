@@ -1,7 +1,8 @@
 //! Child exit codes, restart backoff, and storage failures.
 //!
-//! A connection error that is still inside the watch-retry budget is not exit 5.
-//! Exit 2 does not finish the delivery and does not call `on_stop`.
+//! A dropped Redis connection is not an exit. The child retries, and the
+//! supervisor heartbeat keeps its own timer. Exit 2 does not finish the
+//! delivery and does not call `on_stop`.
 
 use std::time::Duration;
 
@@ -96,18 +97,16 @@ pub fn max_tasks_reached(done: u64, max_tasks: u64) -> bool {
     max_tasks > 0 && done >= max_tasks
 }
 
-/// `None` means the child keeps its loop. Exit 5 is only after the budget is spent.
+/// Counts connection errors. A dropped Redis connection never becomes an exit.
 pub fn connection_within_budget(used: &mut u64, limit: u64) -> Option<i32> {
     if *used < limit {
         *used = used.saturating_add(1);
-        None
-    } else {
-        Some(REDIS_EXIT_CODE)
     }
+    None
 }
 
-/// Watch-budget exhaustion and a hard Redis failure are exit 5.
-/// A transport error that still has retries left is not.
+/// A dropped connection is not an exit. The child retries on the next tick,
+/// and the supervisor heartbeat keeps running. Hard Redis failures are exit 5.
 pub fn exit_for_storage(error: &BackendError, used: &mut u64, limit: u64) -> Option<i32> {
     match error {
         BackendError::Transport { .. } => connection_within_budget(used, limit),
@@ -202,14 +201,20 @@ mod tests {
     }
 
     #[test]
-    fn a_connection_error_inside_the_watch_budget_is_not_exit_5() {
+    fn a_connection_error_never_becomes_an_exit() {
         let mut used = 0;
         assert_eq!(connection_within_budget(&mut used, 2), None);
         assert_eq!(used, 1);
         assert_eq!(connection_within_budget(&mut used, 2), None);
-        assert_eq!(connection_within_budget(&mut used, 2), Some(REDIS_EXIT_CODE));
+        assert_eq!(connection_within_budget(&mut used, 2), None);
         let mut used = 0;
-        assert_eq!(connection_within_budget(&mut used, 0), Some(REDIS_EXIT_CODE));
+        assert_eq!(connection_within_budget(&mut used, 0), None);
+        for _ in 0..20 {
+            assert_eq!(
+                exit_for_storage(&BackendError::Transport { detail: "closed".into() }, &mut used, 1),
+                None
+            );
+        }
     }
 
     #[test]
@@ -218,12 +223,8 @@ mod tests {
         let message = MessageId::from_uuid(uuid(2));
         let mut used = 0u64;
         assert_eq!(
-            exit_for_storage(&BackendError::Transport { detail: "closed".into() }, &mut used, 1),
+            exit_for_storage(&BackendError::Transport { detail: "closed".into() }, &mut used, 0),
             None
-        );
-        assert_eq!(
-            exit_for_storage(&BackendError::Transport { detail: "closed".into() }, &mut used, 1),
-            Some(REDIS_EXIT_CODE)
         );
         let mut used = 0;
         let errors = [

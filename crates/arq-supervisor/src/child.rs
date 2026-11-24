@@ -647,8 +647,10 @@ mod tests {
         let mut transport = Scripts::default();
         transport.claims.push_back(Err(BackendError::Transport { detail: "closed".into() }));
         transport.claims.push_back(Err(BackendError::Transport { detail: "closed".into() }));
-        let report = run_child_session(ChildSession::scripted(ChildParams::test_fast(), transport, DispatchMode::ok_now())).await;
-        assert_eq!(report.exit_code, 5);
+        let mut session = ChildSession::scripted(ChildParams::test_fast(), transport, DispatchMode::ok_now());
+        session.max_ticks = Some(6);
+        let report = run_child_session(session).await;
+        assert_eq!(report.exit_code, 0);
         assert_eq!(report.finished, 0);
         assert_eq!(report.on_stop, 0);
 
@@ -764,10 +766,11 @@ mod tests {
         let mut params = ChildParams::test_fast();
         params.renew_every = Duration::ZERO;
         params.watch_retries = 0;
+        params.max_tasks = 1;
         let report = run_child_session(ChildSession::scripted(params, spent, DispatchMode::ok_now())).await;
-        assert_eq!(report.exit_code, 5);
-        assert_eq!(report.finished, 0);
-        assert_eq!(report.on_stop, 0);
+        assert_eq!(report.exit_code, 0);
+        assert_eq!(report.finished, 1);
+        assert_eq!(report.on_stop, 1);
 
         let mut halted = Scripts::default();
         halted.claims.push_back(Ok(delivered()));
@@ -778,6 +781,27 @@ mod tests {
         assert_eq!(report.exit_code, 5);
         assert_eq!(report.finished, 0);
         assert_eq!(report.on_stop, 0);
+
+        let mut dropped = Scripts::default();
+        dropped.claims.push_back(Ok(delivered()));
+        for _ in 0..40 {
+            dropped.renews.push_back(Err(BackendError::Transport { detail: "closed".into() }));
+        }
+        let mut params = ChildParams::test_fast();
+        params.renew_every = Duration::ZERO;
+        params.watch_retries = 0;
+        params.shutdown_timeout = Duration::from_millis(80);
+        let session = ChildSession::scripted(params, dropped, DispatchMode::Hang);
+        let control = session.control.clone();
+        let running = tokio::spawn(run_child_session(session));
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        control.request_drain();
+        let report = tokio::time::timeout(Duration::from_secs(2), running).await.unwrap().unwrap();
+        assert_eq!(report.exit_code, 0);
+        assert_eq!(report.finished, 0);
+        assert_eq!(report.renews, 0);
+        assert!(report.drained);
+        assert!(report.timed_out);
 
         let mut input = Scripts::default();
         input.claims.push_back(Ok(delivered()));
