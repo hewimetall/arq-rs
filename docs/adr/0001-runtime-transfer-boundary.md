@@ -12,7 +12,7 @@ PR №42 `hewimetall/simple-redis-q` на SHA `483e9fc063103708bdf37bfe80ddbc91a
 
 Перенос копирует только компоненты с указанным вызывающим путём. Для каждого компонента manifest в `docs/architecture.md` называет исходный символ, вызывающий путь донора, точку подключения arq-rs и тесты.
 
-`supervise_slot` в `arq-supervisor` проводит `SlotLifecycle` событиями `ProcessEvent` Ready, Drain, Stop, Reaped, Crash и StartFailed. `arq-supervisor` вызывает `AdmissionGate`: `supervisor.rs` закрывает ворота на drain, `child.rs` проверяет `blocks_claim` перед claim. Цикл child и supervisor машину `AttemptLifecycle` не проводят. Строка manifest для неё остаётся открытой, пока один из этих циклов не пошлёт событие и интеграционный тест не покроет вызов.
+`supervise_slot` в `arq-supervisor` проводит `SlotLifecycle` событиями `ProcessEvent` Ready, Drain, Stop, Reaped, Crash и StartFailed. `arq-supervisor` вызывает `AdmissionGate`: `supervisor.rs` закрывает ворота на drain, `child.rs` проверяет `blocks_claim` перед claim. Production-цикл `crates/arq-worker/src/delivery.rs` проводит `AttemptLifecycle` и использует его состояние в решениях о finish и renew. Сценарная сессия supervisor эту машину не проводит. Вызов покрывает `crates/arq-worker/tests/deliver_attempt.rs`.
 
 `QueuePort` не переносится. Транспорт реализуется напрямую через `RedisBackend`, без второй реализации и без порта. `RedisBackend` выполняет `enqueue`, `claim`, `renew`, `finish`, `requeue` и `control` из `docs/operations.md`. `control` включает `cancel`, `kill` и `settle`. Ему же принадлежат maintenance batch и чтение для `QueueAdmin`. Старый `redis_api` донора тоже не переносится.
 

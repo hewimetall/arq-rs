@@ -4,6 +4,9 @@
 //! An active `dispatch` is renewed and then finished. Exit 2 does not finish and
 //! does not call `shutdown`. A committed retry or dead letter is recorded through
 //! `arq_rs.metrics`.
+//!
+//! Each held delivery owns one `AttemptLifecycle`. Finish, renew, and ping read
+//! that state. Redis still decides whether the lease is held.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::JoinHandle;
@@ -12,8 +15,9 @@ use std::time::{Duration, Instant};
 use pyo3::prelude::*;
 
 use arq_core::{
-    AdmissionGate, CanonicalUuid, ClaimAdmission, CycleId, DeliveryToken, Json, LoopEvent,
-    MessageId, ObservedTask, OperationId, OutcomeProposal, ParsedOutcome, PingWatch, TaskId,
+    AdmissionGate, AttemptEvent, AttemptLifecycle, AttemptTransitionError, CanonicalUuid,
+    ClaimAdmission, CycleId, DeliveryToken, ExecutionState, FinishState, Json, LoopEvent, MessageId,
+    ObservedTask, OperationId, OutcomeProposal, OwnershipState, ParsedOutcome, PingWatch, TaskId,
     CONFIG_EXIT_CODE,
 };
 use arq_pybridge::{
@@ -34,6 +38,39 @@ use crate::cli::ChildPlan;
 const DISPATCH_WAIT_SECS: f64 = 86_400.0 * 365.0;
 const DEFAULT_TIME_LIMIT_MS: u64 = 1_800_000;
 
+static BEGIN_FINISH_COUNT: AtomicU64 = AtomicU64::new(0);
+static FINISH_TERMINAL: AtomicU64 = AtomicU64::new(0);
+static FINISH_TRANSPORT_FAULTS: AtomicU64 = AtomicU64::new(0);
+
+const FINISH_CONFIRMED: u64 = 1;
+const FINISH_REJECTED: u64 = 2;
+const FINISH_UNCONFIRMED: u64 = 3;
+
+/// How many times the production loop accepted `BeginFinish`.
+#[doc(hidden)]
+pub fn production_begin_finish_count() -> u64 {
+    BEGIN_FINISH_COUNT.load(Ordering::SeqCst)
+}
+
+/// Terminal finish event the production loop accepted, if it accepted one.
+#[doc(hidden)]
+pub fn production_finish_terminal() -> Option<&'static str> {
+    match FINISH_TERMINAL.load(Ordering::SeqCst) {
+        FINISH_CONFIRMED => Some("confirmed"),
+        FINISH_REJECTED => Some("rejected"),
+        FINISH_UNCONFIRMED => Some("unconfirmed"),
+        _ => None,
+    }
+}
+
+/// The next `count` finish calls fail as transport errors before Redis.
+///
+/// Tests use this to force one retry of the same logical finish.
+#[doc(hidden)]
+pub fn fail_next_finish_transports(count: u64) {
+    FINISH_TRANSPORT_FAULTS.store(count, Ordering::SeqCst);
+}
+
 struct Held {
     queue: String,
     actor: String,
@@ -44,12 +81,12 @@ struct Held {
     renew_at: Instant,
     last_ping: Instant,
     ping: PingWatch,
+    /// Ping budget told renew to stop. This is not an attempt-lifecycle state.
     renew_stopped: bool,
     ping_task: Option<tokio::task::JoinHandle<bool>>,
     dispatch: Option<JoinHandle<DispatchRaw>>,
     outcome: Option<ParsedOutcome>,
-    /// `dispatch` ended in `CancelGraceExceeded`. Finish is not written.
-    abandoned: bool,
+    lifecycle: AttemptLifecycle,
 }
 
 pub(crate) async fn run(plan: &ChildPlan, watch: ParentWatch, app: Py<PyAny>) -> i32 {
@@ -321,7 +358,7 @@ fn hold_delivery(
     } else {
         observed.time_limit_ms
     };
-    Ok(Held {
+    let mut held = Held {
         queue: queue.to_string(),
         actor: observed.actor_name.clone(),
         task_id,
@@ -338,8 +375,10 @@ fn hold_delivery(
         ping_task: None,
         dispatch: Some(start_dispatch(app, event_loop, message)?),
         outcome: None,
-        abandoned: false,
-    })
+        lifecycle: AttemptLifecycle::claimed(),
+    };
+    apply_attempt(&mut held, AttemptEvent::StartHandler).map_err(|error| error.to_string())?;
+    Ok(held)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -362,7 +401,9 @@ async fn poll_held(
     if let Some(code) = renew_if_due(plan, watch, backend, held, transport_used).await {
         return Some(code);
     }
-    take_dispatch_result(held);
+    if let Some(code) = take_dispatch_result(held) {
+        return Some(code);
+    }
     finish_if_ready(plan, watch, backend, held, gate, tasks_done, transport_used).await
 }
 
@@ -374,7 +415,12 @@ async fn poll_ping(
     let Some(current) = held.as_mut() else {
         return None;
     };
-    if current.outcome.is_some() || current.renew_stopped {
+    if current.renew_stopped
+        || !matches!(
+            current.lifecycle.execution,
+            ExecutionState::Running | ExecutionState::CancelRequested
+        )
+    {
         return None;
     }
     let ping_every = Duration::from_millis(plan.config.ping_interval_ms.max(1));
@@ -404,6 +450,12 @@ async fn poll_ping(
         Instant::now(),
     );
     current.renew_stopped = decision.stop_renew;
+    if decision.request_cancel {
+        if let Err(error) = apply_attempt(current, AttemptEvent::RequestCancel) {
+            eprintln!("arq-worker: {error}");
+            return Some(decision.exit_code.unwrap_or(arq_core::PING_BUDGET_EXIT_CODE));
+        }
+    }
     decision.exit_code
 }
 
@@ -415,7 +467,11 @@ async fn renew_if_due(
     transport_used: &mut u64,
 ) -> Option<i32> {
     let due = held.as_ref().is_some_and(|current| {
-        !current.renew_stopped && !current.abandoned && Instant::now() >= current.renew_at
+        !current.renew_stopped
+            && current.lifecycle.ownership == OwnershipState::Held
+            && current.lifecycle.execution != ExecutionState::Stopped
+            && !current.lifecycle.is_terminal()
+            && Instant::now() >= current.renew_at
     });
     if !due {
         return None;
@@ -437,7 +493,14 @@ async fn renew_if_due(
     let confirm = Duration::from_millis(plan.config.renew_confirm_ms.max(1));
     match tokio::time::timeout(confirm, backend.renew(request)).await {
         Ok(Ok(RenewResult::Renewed { .. })) => None,
-        Ok(Ok(RenewResult::NotHeld { exit_code })) => Some(exit_code),
+        Ok(Ok(RenewResult::NotHeld { exit_code })) => {
+            if let Some(current) = held.as_mut() {
+                if let Err(error) = apply_attempt(current, AttemptEvent::LoseOwnership) {
+                    eprintln!("arq-worker: {error}");
+                }
+            }
+            Some(exit_code)
+        }
         Ok(Err(error)) => storage_stop(
             watch,
             &error,
@@ -449,30 +512,46 @@ async fn renew_if_due(
     }
 }
 
-fn take_dispatch_result(held: &mut Option<Held>) {
+fn take_dispatch_result(held: &mut Option<Held>) -> Option<i32> {
     let ready = held.as_ref().is_some_and(|current| {
         current.outcome.is_none()
+            && current.lifecycle.execution != ExecutionState::Stopped
             && current
                 .dispatch
                 .as_ref()
                 .is_some_and(|handle| handle.is_finished())
     });
     if !ready {
-        return;
+        return None;
     }
     let Some(current) = held.as_mut() else {
-        return;
+        return None;
     };
     let Some(handle) = current.dispatch.take() else {
-        return;
+        return None;
     };
     let raw = handle.join().unwrap_or(DispatchRaw::Raised);
     match action_for(&raw) {
         CommitAction::Abandon => {
-            current.abandoned = true;
+            if let Err(error) = apply_attempt(current, AttemptEvent::RequestCancel) {
+                eprintln!("arq-worker: {error}");
+                return Some(arq_core::OWNERSHIP_LOST_EXIT_CODE);
+            }
+            if let Err(error) = apply_attempt(current, AttemptEvent::ConfirmExecutionStopped) {
+                eprintln!("arq-worker: {error}");
+                return Some(arq_core::OWNERSHIP_LOST_EXIT_CODE);
+            }
             current.renew_stopped = true;
+            None
         }
-        CommitAction::Finish(outcome) => current.outcome = Some(outcome),
+        CommitAction::Finish(outcome) => {
+            if let Err(error) = apply_attempt(current, AttemptEvent::HandlerReturned) {
+                eprintln!("arq-worker: {error}");
+                return Some(arq_core::OWNERSHIP_LOST_EXIT_CODE);
+            }
+            current.outcome = Some(outcome);
+            None
+        }
     }
 }
 
@@ -485,12 +564,53 @@ async fn finish_if_ready(
     tasks_done: &mut u64,
     transport_used: &mut u64,
 ) -> Option<i32> {
-    if held.as_ref().is_some_and(|current| current.abandoned) {
+    let (execution, lost, finish, outcome) = {
+        let Some(current) = held.as_ref() else {
+            return None;
+        };
+        (
+            current.lifecycle.execution,
+            current.lifecycle.ownership_lost(),
+            current.lifecycle.finish,
+            current.outcome.clone(),
+        )
+    };
+    if execution == ExecutionState::Stopped && outcome.is_none() {
         return Some(arq_core::OWNERSHIP_LOST_EXIT_CODE);
     }
-    let Some(outcome) = held.as_ref().and_then(|current| current.outcome.clone()) else {
+    if lost && outcome.is_some() {
+        return Some(arq_core::OWNERSHIP_LOST_EXIT_CODE);
+    }
+    let Some(outcome) = outcome else {
         return None;
     };
+    if finish == FinishState::NotStarted {
+        let Some(current) = held.as_mut() else {
+            return None;
+        };
+        if let Err(error) = apply_attempt(current, AttemptEvent::BeginFinish) {
+            eprintln!("arq-worker: {error}");
+            return Some(arq_core::OWNERSHIP_LOST_EXIT_CODE);
+        }
+    } else if finish != FinishState::InFlight {
+        return Some(arq_core::OWNERSHIP_LOST_EXIT_CODE);
+    }
+    if commits_success(&outcome)
+        && !held
+            .as_ref()
+            .is_some_and(|current| current.lifecycle.allowed_success_ack())
+    {
+        return Some(arq_core::OWNERSHIP_LOST_EXIT_CODE);
+    }
+    if let Some(error) = take_finish_transport_fault() {
+        return finish_storage(
+            held,
+            watch,
+            &error,
+            transport_used,
+            plan.config.watch_retries,
+        );
+    }
     let request = {
         let current = held.as_ref().expect("outcome belongs to a delivery");
         FinishRequest {
@@ -509,26 +629,110 @@ async fn finish_if_ready(
     };
     match backend.finish(request).await {
         Ok(FinishResult::Finished { .. }) => {
+            let confirmed = match held.as_mut() {
+                Some(current) => apply_attempt(current, AttemptEvent::FinishConfirmed),
+                None => return Some(arq_core::OWNERSHIP_LOST_EXIT_CODE),
+            };
+            if let Err(error) = confirmed {
+                eprintln!("arq-worker: {error}");
+                *held = None;
+                *tasks_done = tasks_done.saturating_add(1);
+                return stopped_after_finish(gate, *tasks_done, plan);
+            }
             record(&queue, &actor, &outcome);
             *held = None;
             *tasks_done = tasks_done.saturating_add(1);
-            if gate.blocks_claim()
-                || max_tasks_reached(*tasks_done, plan.config.max_tasks_per_child)
-            {
-                Some(0)
-            } else {
-                None
-            }
+            stopped_after_finish(gate, *tasks_done, plan)
         }
-        Ok(FinishResult::Rejected) => Some(arq_core::OWNERSHIP_LOST_EXIT_CODE),
-        Err(error) => storage_stop(
+        Ok(FinishResult::Rejected) => {
+            if let Some(current) = held.as_mut() {
+                if let Err(error) = apply_attempt(current, AttemptEvent::FinishRejectedStale) {
+                    eprintln!("arq-worker: {error}");
+                }
+            }
+            Some(arq_core::OWNERSHIP_LOST_EXIT_CODE)
+        }
+        Err(error) => finish_storage(
+            held,
             watch,
             &error,
             transport_used,
             plan.config.watch_retries,
-            "finish",
         ),
     }
+}
+
+fn stopped_after_finish(gate: &AdmissionGate, tasks_done: u64, plan: &ChildPlan) -> Option<i32> {
+    if gate.blocks_claim() || max_tasks_reached(tasks_done, plan.config.max_tasks_per_child) {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+fn apply_attempt(current: &mut Held, event: AttemptEvent) -> Result<(), AttemptTransitionError> {
+    let next = current.lifecycle.transition(event)?;
+    match event {
+        AttemptEvent::BeginFinish => {
+            BEGIN_FINISH_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+        AttemptEvent::FinishConfirmed => {
+            FINISH_TERMINAL.store(FINISH_CONFIRMED, Ordering::SeqCst);
+        }
+        AttemptEvent::FinishRejectedStale => {
+            FINISH_TERMINAL.store(FINISH_REJECTED, Ordering::SeqCst);
+        }
+        AttemptEvent::FinishUnconfirmed => {
+            FINISH_TERMINAL.store(FINISH_UNCONFIRMED, Ordering::SeqCst);
+        }
+        _ => {}
+    }
+    current.lifecycle = next;
+    Ok(())
+}
+
+fn commits_success(outcome: &ParsedOutcome) -> bool {
+    matches!(
+        outcome,
+        ParsedOutcome::Proposal(OutcomeProposal::Ok | OutcomeProposal::Skipped)
+    )
+}
+
+fn take_finish_transport_fault() -> Option<BackendError> {
+    let left = FINISH_TRANSPORT_FAULTS.load(Ordering::SeqCst);
+    if left == 0 {
+        return None;
+    }
+    if FINISH_TRANSPORT_FAULTS
+        .compare_exchange(left, left - 1, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return take_finish_transport_fault();
+    }
+    Some(BackendError::Transport {
+        detail: "injected finish failure".into(),
+    })
+}
+
+fn finish_storage(
+    held: &mut Option<Held>,
+    watch: &ParentWatch,
+    error: &BackendError,
+    transport_used: &mut u64,
+    limit: u64,
+) -> Option<i32> {
+    let code = storage_stop(watch, error, transport_used, limit, "finish")?;
+    if matches!(
+        error,
+        BackendError::Transport { .. } | BackendError::Indeterminate(_)
+    ) {
+        if let Some(current) = held.as_mut() {
+            if let Err(failure) = apply_attempt(current, AttemptEvent::FinishUnconfirmed) {
+                eprintln!("arq-worker: {failure}");
+            }
+        }
+    }
+    Some(code)
 }
 
 fn storage_stop(
@@ -774,6 +978,124 @@ mod tests {
 
     fn uuid(byte: u8) -> CanonicalUuid {
         CanonicalUuid::from_random_v4([byte; 16])
+    }
+
+    #[test]
+    fn a_second_begin_finish_does_not_count_or_confirm() {
+        let mut current = Held {
+            queue: "q".into(),
+            actor: "process_item".into(),
+            task_id: TaskId::from_uuid(uuid(3)),
+            message_id: MessageId::from_uuid(uuid(3)),
+            cycle_id: CycleId::from_uuid(uuid(4)),
+            token: arq_core::DeliveryToken::from_uuid(uuid(5)),
+            renew_at: std::time::Instant::now(),
+            last_ping: std::time::Instant::now(),
+            ping: PingWatch::new(std::time::Duration::from_secs(1)),
+            renew_stopped: false,
+            ping_task: None,
+            dispatch: None,
+            outcome: None,
+            lifecycle: AttemptLifecycle::claimed(),
+        };
+        let before = production_begin_finish_count();
+        apply_attempt(&mut current, AttemptEvent::StartHandler).unwrap();
+        let again = apply_attempt(&mut current, AttemptEvent::StartHandler).unwrap_err();
+        assert!(again.to_string().contains("illegal"));
+        apply_attempt(&mut current, AttemptEvent::HandlerReturned).unwrap();
+        apply_attempt(&mut current, AttemptEvent::BeginFinish).unwrap();
+        let second = apply_attempt(&mut current, AttemptEvent::BeginFinish).unwrap_err();
+        assert!(second.to_string().contains("illegal"));
+        assert_eq!(production_begin_finish_count(), before + 1);
+        assert_ne!(production_finish_terminal(), Some("confirmed"));
+        apply_attempt(&mut current, AttemptEvent::FinishUnconfirmed).unwrap();
+        assert_eq!(production_finish_terminal(), Some("unconfirmed"));
+    }
+
+    fn in_flight() -> Held {
+        let mut current = Held {
+            queue: "q".into(),
+            actor: "process_item".into(),
+            task_id: TaskId::from_uuid(uuid(6)),
+            message_id: MessageId::from_uuid(uuid(6)),
+            cycle_id: CycleId::from_uuid(uuid(7)),
+            token: arq_core::DeliveryToken::from_uuid(uuid(8)),
+            renew_at: std::time::Instant::now(),
+            last_ping: std::time::Instant::now(),
+            ping: PingWatch::new(std::time::Duration::from_secs(1)),
+            renew_stopped: false,
+            ping_task: None,
+            dispatch: None,
+            outcome: Some(ParsedOutcome::Proposal(OutcomeProposal::Ok)),
+            lifecycle: AttemptLifecycle::claimed(),
+        };
+        for event in [
+            AttemptEvent::StartHandler,
+            AttemptEvent::HandlerReturned,
+            AttemptEvent::BeginFinish,
+        ] {
+            current.lifecycle = current.lifecycle.transition(event).unwrap();
+        }
+        current
+    }
+
+    #[test]
+    fn a_transient_finish_error_is_not_unconfirmed() {
+        let watch = ParentWatch::detached();
+        let transport = BackendError::Transport {
+            detail: "down".into(),
+        };
+        let mut used = 0;
+        let mut held = Some(in_flight());
+        assert_eq!(
+            finish_storage(&mut held, &watch, &transport, &mut used, 2),
+            None
+        );
+        assert_eq!(
+            held.as_ref().unwrap().lifecycle.finish,
+            FinishState::InFlight
+        );
+
+        let conflict = BackendError::Conflict(arq_core::OperationConflict {
+            operation_id: arq_core::OperationId::from_uuid(uuid(9)),
+            existing_op: "finish".into(),
+            existing_request: "{}".into(),
+            attempted_op: "finish".into(),
+            attempted_request: "{}".into(),
+        });
+        assert_eq!(
+            finish_storage(&mut held, &watch, &conflict, &mut used, 2),
+            Some(5)
+        );
+        assert_eq!(
+            held.as_ref().unwrap().lifecycle.finish,
+            FinishState::InFlight
+        );
+
+        let unknown = BackendError::Indeterminate(arq_core::IndeterminateOperation {
+            operation_id: arq_core::OperationId::from_uuid(uuid(10)),
+            message_id: MessageId::from_uuid(uuid(10)),
+        });
+        let mut other = Some(in_flight());
+        assert_eq!(
+            finish_storage(&mut other, &watch, &unknown, &mut used, 2),
+            Some(5)
+        );
+        assert_eq!(
+            other.as_ref().unwrap().lifecycle.finish,
+            FinishState::Unconfirmed
+        );
+
+        let mut spent = 2;
+        let mut exhausted = Some(in_flight());
+        assert_eq!(
+            finish_storage(&mut exhausted, &watch, &transport, &mut spent, 2),
+            Some(5)
+        );
+        assert_eq!(
+            exhausted.as_ref().unwrap().lifecycle.finish,
+            FinishState::Unconfirmed
+        );
     }
 
     #[test]
