@@ -1,0 +1,51 @@
+{
+  "key_shape": {
+    "unique_key": "item:{x}:1",
+    "result": "ValueError: unique_key must be 1 to 256 bytes without controls, spaces, or braces",
+    "legal_key_item:x:1": "accepted message 8a978940-8431-4b95-9c0c-433c00226695"
+  },
+  "uniq_without_worker": {
+    "key": "item:probe-uniq:1",
+    "first": {"accepted": true, "id": "fee714a8-5d4a-41ca-a88d-e8aa0e69e6b2"},
+    "second": {"accepted": false, "id": null},
+    "after_worker_finished": {"accepted": true, "id": "1570f655-3eca-4fe1-9e8d-09898639bf06"}
+  },
+  "sigkill_process_group": {
+    "supervisor_pid": 107148,
+    "supervisor_pgid": 107148,
+    "sleep_anchor": {"pid": 107150, "pgid": 107148, "cmd": "/bin/sleep 86400", "alive_after_killpg": false},
+    "child": {
+      "pid": 107151,
+      "pgid": 107151,
+      "cmd": "/workspace/target/debug/arq-worker --child --app bench.arqrs_app:create_app --queues bench --concurrency 1 --factory",
+      "alive_after_killpg": true
+    }
+  },
+  "soft_memory_rss_kb": {
+    "first_child": 107185,
+    "samples_kb": [39920, 45004, 77684, 102440, 108436, 139200, 169952, 189944, 200712],
+    "second_child": 107216,
+    "second_samples_kb": [74796, 77348, 108188, 138940]
+  },
+  "maxmemory_enqueue": {
+    "maxmemory": 1000000,
+    "policy": "noeviction",
+    "error": "arq_rs.errors.RedisError: EXECABORT persisted"
+  },
+  "poison_after_scenario": {
+    "job_id": "five-arqrs-1795510948",
+    "message_id": "ade85a09-737f-444b-89f5-540c803986df",
+    "at_scenario_end": "jobs.status running, five poison attempt notes, Redis state inflight deliveries 5",
+    "lease_deadline_ms": 1795511141392,
+    "started_at_ms": 1795511102944,
+    "after_expired_lease_and_a_new_worker": {
+      "redis_state": "dead",
+      "redis_reason": "max_deliveries",
+      "redis_deliveries": "5",
+      "dead_zcard": 1,
+      "postgres_status": "running",
+      "postgres_fail_reason": null,
+      "failed_note": false
+    }
+  }
+}

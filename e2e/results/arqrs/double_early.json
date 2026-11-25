@@ -1,0 +1,24 @@
+{
+  "library": "arqrs",
+  "scenario": "double_early",
+  "scale": "short",
+  "started_at": "2026-11-24T08:55:44.170336+00:00",
+  "measured": true,
+  "first": {
+    "sigterm_at": 1795510546.471644,
+    "exit_at": 1795510546.6717792,
+    "t_drain_s": 0.2,
+    "killed_after_grace": false,
+    "code": 0,
+    "already_exited": false
+  },
+  "second": {
+    "sigterm_at": 1795510548.6719182,
+    "exit_at": 1795510548.8720531,
+    "t_drain_s": 0.2,
+    "killed_after_grace": false,
+    "code": 0,
+    "already_exited": false
+  },
+  "duration_s": 4.702
+}

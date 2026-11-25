@@ -1,0 +1,45 @@
+{
+  "library": "arqrs",
+  "scenario": "smoke",
+  "scale": "short",
+  "started_at": "2026-11-24T08:50:55.359568+00:00",
+  "measured": true,
+  "ready": true,
+  "send": {
+    "accepted": true,
+    "id": "c1023acb-c2cf-4268-8e85-d9b5d189e459",
+    "unique_key": null,
+    "unique_key_raw": null
+  },
+  "got": 8,
+  "invariant": {
+    "expected": 8,
+    "lost": 0,
+    "duplicated": 0,
+    "attempts": 8,
+    "distinct_items": 8,
+    "progress_steps": 0,
+    "skips": 0,
+    "status": "done",
+    "fail_reason": null,
+    "cancelled": false,
+    "expected_n": 8
+  },
+  "mock": {
+    "keys": 8,
+    "calls": 8,
+    "duplicated_keys": 0
+  },
+  "rss": 108998656,
+  "stop": [
+    {
+      "sigterm_at": 1795510256.3666909,
+      "exit_at": 1795510256.566889,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 1.207
+}

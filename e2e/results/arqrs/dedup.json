@@ -1,0 +1,54 @@
+{
+  "library": "arqrs",
+  "scenario": "dedup",
+  "scale": "short",
+  "started_at": "2026-11-24T08:50:56.577614+00:00",
+  "measured": true,
+  "first": {
+    "accepted": true,
+    "id": "a1b4fbb3-f428-4d22-b944-b39df00269fa",
+    "unique_key": "item:dedup-arqrs-1795510256:1",
+    "unique_key_raw": "item:dedup-arqrs-1795510256:1"
+  },
+  "second": {
+    "accepted": true,
+    "id": "97103ae9-5a9e-4e4b-9876-605a8ad58add",
+    "unique_key": "item:dedup-arqrs-1795510256:1",
+    "unique_key_raw": "item:dedup-arqrs-1795510256:1"
+  },
+  "after_ack": {
+    "accepted": true,
+    "id": "48965c7b-178c-42b7-9549-924186d2b935",
+    "unique_key": "item:dedup-arqrs-1795510256:1",
+    "unique_key_raw": "item:dedup-arqrs-1795510256:1"
+  },
+  "invariant": {
+    "expected": 1,
+    "lost": 0,
+    "duplicated": 1,
+    "attempts": 3,
+    "distinct_items": 1,
+    "progress_steps": 0,
+    "skips": 0,
+    "status": "done",
+    "fail_reason": null,
+    "cancelled": false,
+    "expected_n": 1
+  },
+  "mock": {
+    "keys": 1,
+    "calls": 3,
+    "duplicated_keys": 1
+  },
+  "stop": [
+    {
+      "sigterm_at": 1795510260.8287416,
+      "exit_at": 1795510261.029012,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 4.451
+}

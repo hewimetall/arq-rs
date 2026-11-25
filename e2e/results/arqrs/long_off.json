@@ -1,0 +1,35 @@
+{
+  "library": "arqrs",
+  "scenario": "long_off",
+  "scale": "short",
+  "started_at": "2026-11-24T08:52:38.024625+00:00",
+  "measured": true,
+  "checkpoint": false,
+  "ready_new": true,
+  "stop": [
+    {
+      "sigterm_at": 1795510360.753456,
+      "exit_at": 1795510362.7548296,
+      "t_drain_s": 2.001,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "gap": {
+    "gap_s": null,
+    "starts_after": 0
+  },
+  "progress": 4,
+  "steps": 4,
+  "attempts": [
+    {
+      "note": "long retries=0 deliveries=1 id=21326892-e98a-490a-972c-9994910bb53e",
+      "ts": "1795510358.553441"
+    }
+  ],
+  "sigterm_at": 1795510360.7534344,
+  "rss_peak": 58843136,
+  "admin_log": "/workspace/e2e/results/admin-arqrs.jsonl",
+  "duration_s": 5.347
+}

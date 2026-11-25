@@ -1,0 +1,54 @@
+{
+  "library": "arqrs",
+  "scenario": "shell_sigterm",
+  "scale": "short",
+  "started_at": "2026-11-24T08:52:02.839342+00:00",
+  "measured": true,
+  "rows": [
+    {
+      "shell": "bash",
+      "signal": "process_group",
+      "stop": {
+        "sigterm_at": 1795510324.0504897,
+        "exit_at": 1795510324.250603,
+        "t_drain_s": 0.2,
+        "killed_after_grace": false,
+        "code": 0,
+        "already_exited": false
+      }
+    },
+    {
+      "shell": "exec",
+      "signal": "process_group",
+      "stop": {
+        "sigterm_at": 1795510325.471688,
+        "exit_at": 1795510325.6718783,
+        "t_drain_s": 0.2,
+        "killed_after_grace": false,
+        "code": 0,
+        "already_exited": false
+      }
+    },
+    {
+      "shell": "bash",
+      "signal": "pid1",
+      "stop": {
+        "sigterm_at": 1795510326.8970737,
+        "t_drain_s": 0.2,
+        "killed_after_grace": false,
+        "code": 0
+      }
+    },
+    {
+      "shell": "exec",
+      "signal": "pid1",
+      "stop": {
+        "sigterm_at": 1795510328.3170345,
+        "t_drain_s": 0.2,
+        "killed_after_grace": false,
+        "code": 0
+      }
+    }
+  ],
+  "duration_s": 5.678
+}

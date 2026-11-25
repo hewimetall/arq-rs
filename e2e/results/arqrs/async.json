@@ -1,0 +1,35 @@
+{
+  "library": "arqrs",
+  "scenario": "async",
+  "scale": "short",
+  "started_at": "2026-11-24T08:52:28.439030+00:00",
+  "measured": true,
+  "sent": {
+    "accepted": 16,
+    "rejected": 0,
+    "seconds": 0.034,
+    "sample_ids": [
+      "f9b1848c-70ab-4ca9-8de1-3ddd3892d842",
+      "8ad64546-c679-417e-8dfc-f61e778b9eca",
+      "6450d287-1188-44f4-8e0a-ca8c10f518d5"
+    ],
+    "native_dedup": false
+  },
+  "ends": 16,
+  "elapsed_s": 4.955,
+  "work_span_s": 4.759,
+  "serial_s": 4.0,
+  "parallel_floor_s": 1.0,
+  "concurrency": 4,
+  "stop": [
+    {
+      "sigterm_at": 1795510353.8046257,
+      "exit_at": 1795510354.004774,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 5.566
+}

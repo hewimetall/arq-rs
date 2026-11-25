@@ -1,0 +1,20 @@
+{
+  "library": "arqrs",
+  "scenario": "admin",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:21.256112+00:00",
+  "measured": true,
+  "ready": true,
+  "admin_excerpt": "{\"snapshot\": {\"taken_at\": 1795510281759, \"queues\": [{\"name\": \"bench\", \"ready\": 0, \"scheduled\": 0, \"inflight\": 0, \"done\": 1, \"dead\": 0, \"ready_zcard\": 0}], \"supervisors\": [{\"host\": \"cursor\", \"pid\": 105725, \"started_at_ms\": 1795510281292, \"version\": \"0.1.0\", \"queues\": [\"bench\"], \"processes\": 1, \"concurrency\": 1, \"max_tasks\": 500, \"memory_soft_ratio\": \"0.8\", \"memory_hard_ratio\": \"0.95\", \"child_memory_soft\": null, \"child_memory_hard\": null, \"cgroup\": \"/system.slice/pod-32tgfdp47ffdrhjk5tjpdxqige-196bde7c/cursor-agent/workload\", \"recycled\": 0, \"drains\": 0, \"kills\": 0, \"restarts\": 0, \"last_seen_ms\": 1795510281292, \"children\": [{\"host\": \"cursor\", \"parent_pid\": 105725, \"slot\": 0, \"pid\": 105729, \"ppid\": 105725, \"state\": \"running\", \"reason\": \"\", \"exit_code\": null, \"rss_bytes\": 495616, \"started_at_ms\": 1795510281291, \"ended_at_ms\": null, \"tasks_done\": 0, \"max_tasks\": 500, \"alive\": true, \"alive_window_ms\": 120000, \"tasks\": []}], \"in_progress\": 1}], \"orphans\": []}, \"dead\": [], \"waiting\": []}",
+  "stop": [
+    {
+      "sigterm_at": 1795510281.7796054,
+      "exit_at": 1795510281.9797478,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 0.724
+}

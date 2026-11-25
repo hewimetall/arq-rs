@@ -1,0 +1,20 @@
+{
+  "library": "arqrs",
+  "scenario": "sigterm_short",
+  "scale": "short",
+  "started_at": "2026-11-24T08:51:45.249694+00:00",
+  "measured": true,
+  "sigterm_at": 1795510305.9985585,
+  "stop": [
+    {
+      "sigterm_at": 1795510305.9985719,
+      "exit_at": 1795510311.0013278,
+      "t_drain_s": 5.003,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "attempts": 2,
+  "duration_s": 5.752
+}

@@ -1,0 +1,42 @@
+{
+  "library": "arqrs",
+  "scenario": "soft_memory",
+  "scale": "short",
+  "started_at": "2026-11-24T09:01:37.243844+00:00",
+  "measured": true,
+  "ready": true,
+  "pids": [
+    107185,
+    107216
+  ],
+  "invariant": {
+    "expected": 8,
+    "lost": 0,
+    "duplicated": 0,
+    "attempts": 8,
+    "distinct_items": 8,
+    "progress_steps": 0,
+    "skips": 0,
+    "status": "done",
+    "fail_reason": null,
+    "cancelled": false,
+    "expected_n": 8
+  },
+  "admin_keys": [
+    "snapshot",
+    "dead",
+    "waiting"
+  ],
+  "log_tail": "arq-worker: unknown configuration variable ARQ_WORKER\narq-worker: unknown configuration variable ARQ_MAX_JOBS",
+  "stop": [
+    {
+      "sigterm_at": 1795510902.7033617,
+      "exit_at": 1795510902.903595,
+      "t_drain_s": 0.2,
+      "killed_after_grace": false,
+      "code": 0,
+      "already_exited": false
+    }
+  ],
+  "duration_s": 5.66
+}
