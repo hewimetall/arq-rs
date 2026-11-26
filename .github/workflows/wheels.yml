@@ -15,10 +15,12 @@ jobs:
         target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
+      # The manylinux image has no `python3` on PATH. --find-interpreter
+      # builds one wheel per CPython under /opt/python that matches requires-python.
       - uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist
+          args: --release --out dist --find-interpreter
           manylinux: auto
           rust-toolchain: 1.99.1
       - uses: actions/upload-artifact@v4
@@ -43,7 +45,7 @@ jobs:
       - uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --manifest-path crates/arq-worker/Cargo.toml
+          args: --release --out dist --manifest-path crates/arq-worker/Cargo.toml --find-interpreter
           manylinux: auto
           rust-toolchain: 1.99.1
       - uses: actions/upload-artifact@v4
@@ -56,11 +58,14 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      # checkout writes a lightweight tag even when the remote tag is annotated,
+      # so cat-file would see a commit. Fetch the tag object before the check.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Require an annotated tag
         run: |
+          git fetch origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" --force
           kind=$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")
           if [ "$kind" != "tag" ]; then
             echo "${GITHUB_REF_NAME} is a ${kind}. Publish accepts an annotated v* tag only." >&2
