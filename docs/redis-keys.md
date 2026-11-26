@@ -25,7 +25,7 @@
 | `q:{queue}:dead:tag:{tag}` | ZSET | тот же член и score для задач с tag |
 | `q:{queue}:receipt:{operation_id}` | STRING | канонический JSON запроса и результата |
 | `q:{queue}:quarantine` | ZSET | член, который нельзя выдать: нет hash, hash не того типа или `task_id` не разбирается. Score — Unix ms переноса |
-| `q:{queue}:qreason` | HASH | поле — член карантина, значение — `missing_hash`, `hash_type` или `task_id` |
+| `q:{queue}:qreason` | HASH | поле — член карантина, значение — `missing_hash`, `hash_type`, `task_id` или `job_fields` |
 | `q:{queue}:halted` | STRING | причина системного halt. Ключ отсутствует, пока очередь не остановлена |
 
 Отдельной записи delivery нет. Текущая доставка лежит в hash задачи.

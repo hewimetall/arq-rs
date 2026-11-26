@@ -41,6 +41,8 @@ struct Inner {
     resp3: bool,
     config: Config,
     halted: Mutex<std::collections::BTreeSet<String>>,
+    /// Resume point for the next claim scan of one index. One poll does not reread the whole due set.
+    scan_offset: Mutex<HashMap<String, usize>>,
     /// `(queue, reason)` notes from quarantine moves. The child drains them into metrics.
     quarantine: Mutex<Vec<(String, String)>>,
     inconsistent: AtomicU64,
@@ -63,6 +65,7 @@ impl RedisBackend {
                 resp3: url.contains("protocol=resp3") || url.contains("protocol=3"),
                 config,
                 halted: Mutex::new(std::collections::BTreeSet::new()),
+                scan_offset: Mutex::new(HashMap::new()),
                 quarantine: Mutex::new(Vec::new()),
                 inconsistent: AtomicU64::new(0),
                 fault: Mutex::new(Fault::default()),
@@ -139,14 +142,38 @@ impl RedisBackend {
         }
     }
 
-    fn persist_halt(&self, queue: &str, detail: &str) {
+    /// `true` only after Redis accepted `SET`. A failed write is not a halt.
+    fn persist_halt(&self, queue: &str, detail: &str) -> bool {
         let Ok(keys) = QueueKeys::new(queue) else {
-            return;
+            return false;
         };
         let Ok(mut session) = self.open_session(queue) else {
-            return;
+            return false;
         };
-        let _ = session.set(&keys.halted(), detail);
+        session.set(&keys.halted(), detail).is_ok()
+    }
+
+    pub(crate) fn scan_offset(&self, index: &str) -> usize {
+        self.inner
+            .scan_offset
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(index)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn set_scan_offset(&self, index: &str, offset: usize) {
+        let mut offsets = self
+            .inner
+            .scan_offset
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if offset == 0 {
+            offsets.remove(index);
+        } else {
+            offsets.insert(index.to_string(), offset);
+        }
     }
 
     pub(crate) fn note_quarantine(&self, queue: &str, reason: &str) {
@@ -186,8 +213,8 @@ impl RedisBackend {
             "arq_storage_inconsistent queue={} detail={}",
             error.queue, error.detail
         );
-        if halts_the_queue(&error.detail) && !self.halt_cached(&error.queue) {
-            self.persist_halt(&error.queue, &error.detail);
+        if halts_the_queue(&error.detail) && !self.halt_cached(&error.queue) && self.persist_halt(&error.queue, &error.detail)
+        {
             self.cache_halt(&error.queue);
         }
         BackendError::Inconsistent(error)
@@ -432,7 +459,7 @@ where
 }
 
 /// Whole-queue halt is only for a broken shared index, a bad `EXEC`, or `CROSSSLOT`.
-fn halts_the_queue(detail: &str) -> bool {
+pub fn halts_the_queue(detail: &str) -> bool {
     if detail == "CROSSSLOT on queue keys"
         || detail.contains("EXEC array was the wrong length or contained a command error")
     {

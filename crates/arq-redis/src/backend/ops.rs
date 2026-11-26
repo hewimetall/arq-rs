@@ -20,6 +20,41 @@ use arq_core::{
 use std::thread;
 use std::time::Duration;
 
+fn member_field_inconsistency(detail: &str) -> bool {
+    matches!(
+        detail,
+        "present without state"
+            | "present task without task_id"
+            | "ready without available_at_ms"
+            | "inflight without lease"
+    )
+}
+
+fn job_fields_still_bad(fields: &[(String, String)]) -> bool {
+    let get = |name: &str| {
+        fields
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    };
+    if get("task_id")
+        .and_then(|text| TaskId::parse(text).ok())
+        .is_none()
+    {
+        return true;
+    }
+    match get("state") {
+        Some("ready") => get("available_at_ms")
+            .and_then(|text| text.parse::<u64>().ok())
+            .is_none(),
+        Some("inflight") => get("lease_deadline_ms")
+            .and_then(|text| text.parse::<u64>().ok())
+            .is_none(),
+        Some("done" | "dead") => false,
+        _ => true,
+    }
+}
+
 enum Apply {
     Watch,
     Abort,
@@ -296,8 +331,7 @@ impl RedisBackend {
         }
         session.expect_type(&keys.inflight())?;
         session.expect_type(&keys.ready())?;
-        // Overdue inflight is scanned first, then due ready. A skipped or quarantined member
-        // does not end the scan and does not hide a later healthy task.
+        // One page of skips per index, then the other index. The offset is kept for the next poll.
         let mut seen = Vec::new();
         for index in [keys.inflight(), keys.ready()] {
             if let Some(step) = self.walk_due(session, request, &keys, &index, now, &mut seen)? {
@@ -317,9 +351,15 @@ impl RedisBackend {
         now: u64,
         seen: &mut Vec<String>,
     ) -> Result<Option<Step<ClaimResult>>, Fail> {
-        let mut offset = 0usize;
+        let mut offset = self.scan_offset(index);
+        let mut examined = 0usize;
         let mut stuck = 0u32;
+        let mut wrapped = false;
         loop {
+            if examined >= CLAIM_CANDIDATE_WINDOW {
+                self.set_scan_offset(index, offset);
+                return Ok(None);
+            }
             let page = session.zrange_with_scores(
                 index,
                 "-inf",
@@ -329,7 +369,13 @@ impl RedisBackend {
                 CLAIM_CANDIDATE_WINDOW,
             )?;
             if page.is_empty() {
-                return Ok(None);
+                self.set_scan_offset(index, 0);
+                if offset == 0 || wrapped {
+                    return Ok(None);
+                }
+                offset = 0;
+                wrapped = true;
+                continue;
             }
             let mut removed = 0usize;
             for (member, _) in &page {
@@ -353,6 +399,7 @@ impl RedisBackend {
                 continue;
             }
             stuck = 0;
+            examined = examined.saturating_add(stayed);
             offset = offset.saturating_add(stayed);
         }
     }
@@ -382,9 +429,15 @@ impl RedisBackend {
                 return Ok(Look::Stay);
             }
         }
-        match self.claim_candidate(session, request, task_id)? {
-            Candidate::Next => Ok(Look::Stay),
-            Candidate::Stop(step) => Ok(Look::Stop(step)),
+        match self.claim_candidate(session, request, task_id) {
+            Ok(Candidate::Next) => Ok(Look::Stay),
+            Ok(Candidate::Stop(step)) => Ok(Look::Stop(step)),
+            Err(Fail::Backend(BackendError::Inconsistent(error)))
+                if member_field_inconsistency(&error.detail) =>
+            {
+                self.park_member(session, keys, member, now, "job_fields")
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -422,6 +475,10 @@ impl RedisBackend {
             let still_bad = match reason {
                 "missing_hash" => kind == "none",
                 "hash_type" => kind != "hash" && kind != "none",
+                "job_fields" => {
+                    let key = watched.last().expect("job key");
+                    kind != "hash" || job_fields_still_bad(&session.hgetall(key)?)
+                }
                 _ => true,
             };
             if !still_bad {

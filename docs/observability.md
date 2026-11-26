@@ -44,7 +44,7 @@
 | `arq_control_commands_total` | `queue_name`, `op`, `status` | `cancel`, `kill`, `requeue`, `settle` и статус ответа |
 | `arq_operations_indeterminate_total` | `queue_name`, `op` | `IndeterminateOperation` |
 | `arq_storage_inconsistent` | `queue_name` | gauge 1 после того, как этот child увидел halted очередь |
-| `arq_quarantine_total` | `queue_name`, `reason` | counter переносов в `q:{queue}:quarantine`; `reason` — `missing_hash`, `hash_type`, `task_id` |
+| `arq_quarantine_total` | `queue_name`, `reason` | counter переносов в `q:{queue}:quarantine`; `reason` — `missing_hash`, `hash_type`, `task_id`, `job_fields` |
 
 `arq_queue_depth{state="ready"}` считает члены `q:{queue}:ready` со score не выше Redis `TIME` на момент снятия. `state="scheduled"` считает остальные члены того же ZSET. Ряды не пересекаются и в сумме дают `ZCARD`. `ARQ_MAX_READY` сравнивается с этой суммой, а не с одним рядом `ready`. Задача переходит из `scheduled` в `ready` с ходом времени, без записи в Redis. `inflight`, `done` и `dead` читаются из своих ключей и в эту сумму не входят.
 

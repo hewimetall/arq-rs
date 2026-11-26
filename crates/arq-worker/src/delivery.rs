@@ -27,8 +27,8 @@ use arq_pybridge::{
     spawn_event_loop, stop_event_loop, CommitAction, DispatchRaw,
 };
 use arq_redis::{
-    BackendError, ClaimRequest, ClaimResult, FinishRequest, FinishResult, RedisBackend,
-    RenewRequest, RenewResult,
+    halts_the_queue, BackendError, ClaimRequest, ClaimResult, FinishRequest, FinishResult,
+    RedisBackend, RenewRequest, RenewResult,
 };
 use arq_supervisor::{
     exit_effects, exit_for_storage, max_tasks_reached, parent_or_signal_drain, ParentWatch,
@@ -351,7 +351,7 @@ async fn claim_one(
         Err(error) => {
             if stop_requested(watch) {
                 ClaimStep::Stop(0)
-            } else if matches!(error, BackendError::Halted { .. }) {
+            } else if claim_waits_for_halt(&error) {
                 if halt_logged.insert(queue.clone()) {
                     HALT_LOGS.fetch_add(1, Ordering::SeqCst);
                     eprintln!("arq-worker: claim halted queue={queue}");
@@ -367,6 +367,14 @@ async fn claim_one(
                 ClaimStep::Again
             }
         }
+    }
+}
+
+fn claim_waits_for_halt(error: &BackendError) -> bool {
+    match error {
+        BackendError::Halted { .. } => true,
+        BackendError::Inconsistent(error) => halts_the_queue(&error.detail),
+        _ => false,
     }
 }
 

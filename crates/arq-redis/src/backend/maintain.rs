@@ -177,14 +177,36 @@ mod tests {
 
     #[test]
     fn halted_queue_stops_before_another_delete() {
-        let backend = RedisBackend::connect("redis://127.0.0.1:1", Config::parse(std::iter::empty::<(&str, &str)>()).unwrap()).unwrap();
+        let backend = RedisBackend::connect(
+            "redis://127.0.0.1:6379/1",
+            Config::parse(std::iter::empty::<(&str, &str)>()).unwrap(),
+        )
+        .unwrap();
         let _ = backend.note_inconsistent(StorageInconsistency {
+            queue: "haltkeep".into(),
+            operation_id: None,
+            detail: "EXEC array was the wrong length or contained a command error".into(),
+        });
+        assert!(backend.is_halted("haltkeep"));
+        let task = TaskId::from_uuid(CanonicalUuid::from_random_v4([9; 16]));
+        let error = backend.delete_terminal("haltkeep", Index::Dead, task).unwrap_err();
+        assert!(matches!(error, BackendError::Halted { .. }));
+        let offline = RedisBackend::connect(
+            "redis://127.0.0.1:1",
+            Config::parse(std::iter::empty::<(&str, &str)>()).unwrap(),
+        )
+        .unwrap();
+        let _ = offline.note_inconsistent(StorageInconsistency {
             queue: "default".into(),
             operation_id: None,
             detail: "EXEC array was the wrong length or contained a command error".into(),
         });
-        let task = TaskId::from_uuid(CanonicalUuid::from_random_v4([9; 16]));
-        let error = backend.delete_terminal("default", Index::Dead, task).unwrap_err();
-        assert!(matches!(error, BackendError::Halted { .. }));
+        assert!(!offline.is_halted("default"));
+        let Ok(client) = redis::Client::open("redis://127.0.0.1:6379/1") else {
+            return;
+        };
+        if let Ok(mut con) = client.get_connection() {
+            let _: redis::RedisResult<()> = redis::cmd("DEL").arg("q:{haltkeep}:halted").query(&mut con);
+        }
     }
 }

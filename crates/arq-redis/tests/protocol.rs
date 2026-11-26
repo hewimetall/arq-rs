@@ -1447,6 +1447,81 @@ fn a_broken_member_is_quarantined_and_the_next_task_is_claimed() {
 }
 
 #[test]
+fn a_hash_without_claim_fields_is_quarantined_and_the_next_task_is_claimed() {
+    harness(async {
+        let backend = open_backend(&[]);
+        let EnqueueResult::Enqueued { task_id: broken, .. } = enqueue(&backend, job(9700, None, 0)).await else {
+            panic!("enqueue")
+        };
+        let EnqueueResult::Enqueued { task_id: healthy, .. } = enqueue(&backend, job(9701, None, 0)).await else {
+            panic!("enqueue")
+        };
+        let mut con = conn();
+        let _: i64 = redis::cmd("DEL").arg(job_key(9700)).query(&mut con).unwrap();
+        let _: i64 = redis::cmd("HSET").arg(job_key(9700)).arg("filler").arg("1").query(&mut con).unwrap();
+        let _: i64 = redis::cmd("ZADD").arg("q:{default}:ready").arg(1).arg(broken.to_string()).query(&mut con).unwrap();
+        let claimed = claim_to(&backend, 9701, 15_000).await;
+        assert_eq!(delivered(&claimed).task_id, Some(healthy));
+        assert_eq!(hget("q:{default}:qreason", &broken.to_string()).as_deref(), Some("job_fields"));
+        assert!(zscore("q:{default}:ready", &broken.to_string()).is_none());
+        assert!(!backend.is_halted("default"));
+        assert!(get("q:{default}:halted").is_none());
+    });
+}
+
+#[test]
+fn a_later_inflight_is_claimed_on_the_poll_after_a_full_skip_page() {
+    harness(async {
+        let backend = open_backend(&[]);
+        let mut con = conn();
+        for n in 0..16u128 {
+            let id = 4_200 + n;
+            let EnqueueResult::Enqueued { task_id, .. } = enqueue(&backend, job(id, None, 0)).await else { panic!("enqueue") };
+            let member = task_id.to_string();
+            let _: i64 = redis::cmd("HSET")
+                .arg(job_key(id))
+                .arg("control_op")
+                .arg("cancel")
+                .arg("state")
+                .arg("inflight")
+                .arg("lease_deadline_ms")
+                .arg("1")
+                .query(&mut con)
+                .unwrap();
+            let _: i64 = redis::cmd("ZREM").arg("q:{default}:ready").arg(&member).query(&mut con).unwrap();
+            let _: i64 = redis::cmd("ZADD").arg("q:{default}:inflight").arg(1).arg(&member).query(&mut con).unwrap();
+        }
+        let EnqueueResult::Enqueued { task_id, .. } = enqueue(&backend, job(4800, None, 0)).await else { panic!("enqueue") };
+        let member = task_id.to_string();
+        let _: i64 = redis::cmd("HSET")
+            .arg(job_key(4800))
+            .arg("state")
+            .arg("inflight")
+            .arg("lease_deadline_ms")
+            .arg("1")
+            .query(&mut con)
+            .unwrap();
+        let _: i64 = redis::cmd("ZREM").arg("q:{default}:ready").arg(&member).query(&mut con).unwrap();
+        let _: i64 = redis::cmd("ZADD").arg("q:{default}:inflight").arg(2).arg(&member).query(&mut con).unwrap();
+        let first = backend
+            .claim(ClaimRequest {
+                operation_id: op(4801),
+                message_id: message(4801),
+                queue: "default".into(),
+                worker_id: "worker-4801".into(),
+                proposed_token: token(4801),
+                lease_ms: 15_000,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(first, ClaimResult::Idle), "{first:?}");
+        let claimed = claim_to(&backend, 4800, 15_000).await;
+        assert_eq!(delivered(&claimed).task_id, Some(task_id));
+        assert!(!backend.is_halted("default"));
+    });
+}
+
+#[test]
 fn blocked_inflight_pages_do_not_hide_a_ready_task() {
     harness(async {
         let backend = open_backend(&[]);
