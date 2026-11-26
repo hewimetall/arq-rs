@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+`0.1.1` добавляет странице PyPI короткое описание из `[project].description` и длинное из `[project].readme`: `packaging/arq-rs.md` для `arq-rs`, `crates/arq-worker/README.md` для `arq-rs-worker`. Оба текста английские. Уже залитый `0.1.0` PyPI не переписывает.
+
 Выпуск содержит нормативный контракт Redis-очереди от 2026-11-23 и реализацию в `crates/` и `python/arq_rs`. Расхождение с документом оформляется ADR.
 
 Контракт определяет:

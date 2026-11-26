@@ -70,6 +70,8 @@ Workspace плоский: `crates/<имя>`, виртуальный корнев
 | `arq-rs` | Python-пакет `arq_rs` и расширение `arq_rs._native` | `maturin` из корневого `pyproject.toml` |
 | `arq-rs-worker` | бинарник `arq-worker` | `scripts/build-worker-wheel.sh` против общей `libpython3.12` |
 
+Короткое описание на PyPI — `[project].description`. Длинное — `[project].readme`: `packaging/arq-rs.md` и `crates/arq-worker/README.md`, оба на английском. Уже опубликованную версию PyPI не переписывает.
+
 `arq-pybridge` имеет `crate-type = ["cdylib", "rlib"]`. Feature `extension-module` включает только сборка maturin. `arq-worker` этот feature не включает, линкуется с libpython и зависит от `arq-pybridge` как от rlib. `.github/workflows/wheels.yml` собирает wheel `arq-rs` через `PyO3/maturin-action` для CPython 3.12 (`x86_64` и `aarch64`). Wheel `arq-rs-worker` собирает `scripts/build-worker-wheel.sh` на раннере с общей `libpython3.12.so.1.0`: образ manylinux собирает CPython с `--disable-shared` и линковать бинарник там не с чем. `auditwheel repair` кладёт эту библиотеку в wheel и даёт тег manylinux. Stdlib CPython 3.12 берётся с машины. Публикация запускается после `release-gate` только push-событием аннотированного тега `v*`: `arq-rs` из GitHub Environment `pypi`, `arq-rs-worker` из `pypi-worker`. `workflow_dispatch` собирает wheel и запускает smoke. Этот запуск публикацию не включает. Обязательные ревьюеры сред `pypi` и `pypi-worker` задаёт репозиторий. Создание тегов `v*` остаётся ограниченным мейнтейнерами. Smoke в чистом venv ставит оба пакета одной версии и запускает `arq-worker --version` и `python -c "import arq_rs"`. Единый wheel не собирается.
 
 ## Поток одной доставки

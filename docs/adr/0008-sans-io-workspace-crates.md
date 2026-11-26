@@ -60,6 +60,7 @@ module-name = "arq_rs._native"
 
 - `arq-pybridge` собирается как `crate-type = ["cdylib", "rlib"]`. Feature `extension-module = ["pyo3/extension-module"]` включает только maturin.
 - `arq-worker` этот feature не включает, линкуется с libpython и зависит от `arq-pybridge` как от rlib.
+- Короткое описание PyPI — `[project].description`. Длинное — `[project].readme`: `packaging/arq-rs.md` и `crates/arq-worker/README.md`.
 - `.github/workflows/wheels.yml` собирает wheel `arq-rs` через `PyO3/maturin-action` и `-i python3.12` для `x86_64` и `aarch64`. Wheel `arq-rs-worker` собирает `scripts/build-worker-wheel.sh` на раннере `ubuntu-24.04` (`x86_64`) и `ubuntu-24.04-arm` (`aarch64`) против общей `libpython3.12.so.1.0`. Образ manylinux собирает CPython с `--disable-shared` и этой библиотеки не содержит.
 - Публикация запускается только на push аннотированного тега `v*`, после job `release-gate`. `arq-rs` идёт из GitHub Environment `pypi`, `arq-rs-worker` из `pypi-worker`: одна связка owner/repo/workflow/environment на PyPI принадлежит одному проекту. У обоих job права `id-token: write`, `contents: read` и `actions: read`. Каждый job оставляет в `dist` только свои wheel.
 - Обязательные ревьюеры сред `pypi` и `pypi-worker` задаются настройкой репозитория GitHub. Workflow эту настройку не создаёт. Создание тегов `v*` остаётся ограниченным мейнтейнерами.
