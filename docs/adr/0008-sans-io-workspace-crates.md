@@ -61,8 +61,8 @@ module-name = "arq_rs._native"
 - `arq-pybridge` собирается как `crate-type = ["cdylib", "rlib"]`. Feature `extension-module = ["pyo3/extension-module"]` включает только maturin.
 - `arq-worker` этот feature не включает, линкуется с libpython и зависит от `arq-pybridge` как от rlib.
 - `.github/workflows/wheels.yml` собирает оба wheel, `arq-rs` и `arq-rs-worker`, через `PyO3/maturin-action` и `${{ matrix.target }}` для `x86_64` и `aarch64`.
-- Публикация запускается только на push аннотированного тега `v*`, после job `release-gate`, в GitHub Environment `pypi`, с правами `id-token: write`, `contents: read` и `actions: read`. Два вызова `pypa/gh-action-pypi-publish` делят файлы по префиксу имени.
-- Обязательные ревьюеры среды `pypi` задаются настройкой репозитория GitHub. Workflow эту настройку не создаёт. Создание тегов `v*` остаётся ограниченным мейнтейнерами.
+- Публикация запускается только на push аннотированного тега `v*`, после job `release-gate`. `arq-rs` идёт из GitHub Environment `pypi`, `arq-rs-worker` из `pypi-worker`: одна связка owner/repo/workflow/environment на PyPI принадлежит одному проекту. У обоих job права `id-token: write`, `contents: read` и `actions: read`. Каждый job оставляет в `dist` только свои wheel.
+- Обязательные ревьюеры сред `pypi` и `pypi-worker` задаются настройкой репозитория GitHub. Workflow эту настройку не создаёт. Создание тегов `v*` остаётся ограниченным мейнтейнерами.
 - `workflow_dispatch` собирает wheel и запускает smoke. Публикацию этот запуск не включает.
 - Smoke скачивает артефакты `wheels-*-x86_64` и задаёт `SMOKE_ARCH=x86_64`. `scripts/smoke-venv.sh` берёт платформенный тег как последний компонент имени по `-`. Совпадение архитектуры — суффикс этого тега, поэтому `x86_64` читается целиком в конце тега. Если для архитектуры и тега CPython остаётся больше одного wheel, скрипт завершается с ошибкой.
 - Smoke ставит оба пакета одной версии и запускает `arq-worker --version` и `python -c 'import arq_rs'`.

@@ -67,14 +67,14 @@ jobs:
             exit 1
           fi
 
-  publish:
-    name: publish both distributions
+  publish-arq-rs:
+    name: publish arq-rs
     needs: [arq-rs, arq-rs-worker, release-gate]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    # The pypi environment must require a reviewer. Tag creation on this
-    # repository must stay restricted to maintainers. workflow_dispatch does
-    # not reach this job.
+    # PyPI binds one owner/repo/workflow/environment to one project.
+    # This job's environment is the pending publisher for arq-rs.
+    # workflow_dispatch does not reach this job.
     environment: pypi
     permissions:
       id-token: write
@@ -86,19 +86,43 @@ jobs:
           path: artifacts
           pattern: wheels-*
           merge-multiple: true
-      - name: Split wheels by filename prefix
+      - name: Keep the arq-rs wheels
         run: |
-          mkdir -p dist/arq-rs dist/arq-rs-worker
-          find artifacts -type f -name 'arq_rs_worker-*' -exec cp {} dist/arq-rs-worker/ \;
-          find artifacts -type f -name 'arq_rs-*' ! -name 'arq_rs_worker-*' -exec cp {} dist/arq-rs/ \;
+          mkdir -p dist
+          find artifacts -type f -name 'arq_rs-*' ! -name 'arq_rs_worker-*' -exec cp {} dist/ \;
+          find dist -type f -name '*.whl' | grep -q .
       - name: Publish arq-rs
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/arq-rs
+          packages-dir: dist
+
+  publish-arq-rs-worker:
+    name: publish arq-rs-worker
+    needs: [arq-rs, arq-rs-worker, release-gate, publish-arq-rs]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # A second project needs its own environment. The same wheels.yml
+    # and environment name cannot be a pending publisher for both.
+    environment: pypi-worker
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: wheels-*
+          merge-multiple: true
+      - name: Keep the arq-rs-worker wheels
+        run: |
+          mkdir -p dist
+          find artifacts -type f -name 'arq_rs_worker-*' -exec cp {} dist/ \;
+          find dist -type f -name '*.whl' | grep -q .
       - name: Publish arq-rs-worker
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/arq-rs-worker
+          packages-dir: dist
 
   smoke:
     name: clean venv smoke
