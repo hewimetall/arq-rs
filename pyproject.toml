@@ -5,8 +5,18 @@ build-backend = "maturin"
 [project]
 name = "arq-rs"
 dynamic = ["version"]
-description = "Python package arq_rs and the arq_rs._native extension"
+description = "Redis queue for Python async handlers, with delivery owned by Rust."
+readme = { file = "packaging/arq-rs.md", content-type = "text/markdown" }
 requires-python = ">=3.12"
+license = "MIT"
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+]
+
+[project.urls]
+Homepage = "https://github.com/hewimetall/arq-rs"
+Source = "https://github.com/hewimetall/arq-rs"
 
 [tool.maturin]
 manifest-path = "crates/arq-pybridge/Cargo.toml"
