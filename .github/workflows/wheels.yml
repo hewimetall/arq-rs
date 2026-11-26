@@ -43,9 +43,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check the worker version pin
         run: scripts/build-worker-wheel.sh --check
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.99.1
+      # The runner image already has cargo-fmt. Installing the toolchain
+      # from rust-toolchain.toml on top of that reports a component conflict.
+      - name: Install Rust 1.99.1
+        run: |
+          rustup toolchain uninstall 1.99.1 || true
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+          rustup default 1.99.1
       # The manylinux image builds CPython with --disable-shared, so it has
       # no libpython to link. This job links the runner's libpython3.12.so.1.0.
       - name: Install CPython 3.12 and maturin
