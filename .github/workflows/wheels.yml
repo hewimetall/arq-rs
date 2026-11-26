@@ -55,7 +55,7 @@ jobs:
       - name: Install CPython 3.12 and maturin
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3.12 python3.12-dev python3.12-venv
+          sudo apt-get install -y python3.12 python3.12-dev python3.12-venv patchelf
           if ! python3.12 -m pip --version >/dev/null 2>&1; then
             curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
           fi
@@ -64,6 +64,7 @@ jobs:
       - name: Build the worker wheel
         env:
           PYO3_PYTHON: /usr/bin/python3.12
+          ARQ_AUDITWHEEL: repair
         run: scripts/build-worker-wheel.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -117,6 +118,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          skip-existing: true
 
   publish-arq-rs-worker:
     name: publish arq-rs-worker
@@ -145,11 +147,14 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          skip-existing: true
 
   smoke:
     name: clean venv smoke
     needs: [arq-rs, arq-rs-worker]
-    runs-on: ubuntu-latest
+    # ubuntu-latest is 26.04 and has no python3.12 package. The worker
+    # wheel is linked against the 24.04 libpython.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

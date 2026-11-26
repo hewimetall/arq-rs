@@ -90,11 +90,15 @@ else
   maturin="${root}/.venv-maturin/bin/maturin"
 fi
 
-# bindings = bin. extension-module stays off. auditwheel is skipped so a
+# bindings = bin. extension-module stays off. auditwheel defaults to skip so a
 # missing patchelf or a network fetch does not hide the cargo binary.
 # --manifest-path is the Cargo.toml. Maturin reads the pyproject.toml beside it
 # (bindings = bin) and does not pass --features extension-module.
-set -- build --release --manifest-path crates/arq-worker/Cargo.toml --out dist --auditwheel skip
+# ARQ_AUDITWHEEL=repair vendors libpython and emits a manylinux tag.
+# The default skip leaves the cargo binary in place when patchelf is absent.
+# PyPI rejects a binary wheel tagged linux_*.
+auditwheel_mode=${ARQ_AUDITWHEEL:-skip}
+set -- build --release --manifest-path crates/arq-worker/Cargo.toml --out dist --auditwheel "$auditwheel_mode"
 if [ -n "$triple" ]; then
   set -- "$@" --target "$triple"
 fi
