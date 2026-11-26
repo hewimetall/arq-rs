@@ -15,10 +15,12 @@ jobs:
         target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
+      # cp312 only. A second interpreter in the same cargo target dir
+      # rebuilds pyo3-ffi with the wrong headers, and 3.15t has no PyConfig.
       - uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist
+          args: --release --out dist -i python3.12
           manylinux: auto
           rust-toolchain: 1.99.1
       - uses: actions/upload-artifact@v4
@@ -27,25 +29,43 @@ jobs:
           path: dist/*
 
   arq-rs-worker:
-    name: arq-rs-worker manylinux (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    name: arq-rs-worker (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64, aarch64]
+        include:
+          - target: x86_64
+            runner: ubuntu-24.04
+          - target: aarch64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - name: Check the worker version pin
         run: scripts/build-worker-wheel.sh --check
-      # maturin-action, not the host cargo in build-worker-wheel.sh.
-      # The action supplies the manylinux sysroot for matrix.target, so the
-      # aarch64 job does not emit an x86_64 binary.
-      - uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist --manifest-path crates/arq-worker/Cargo.toml
-          manylinux: auto
-          rust-toolchain: 1.99.1
+      # The runner image already has cargo-fmt. Installing the toolchain
+      # from rust-toolchain.toml on top of that reports a component conflict.
+      - name: Install Rust 1.99.1
+        run: |
+          rustup toolchain uninstall 1.99.1 || true
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+          rustup default 1.99.1
+      # The manylinux image builds CPython with --disable-shared, so it has
+      # no libpython to link. This job links the runner's libpython3.12.so.1.0.
+      - name: Install CPython 3.12 and maturin
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3.12 python3.12-dev python3.12-venv patchelf
+          if ! python3.12 -m pip --version >/dev/null 2>&1; then
+            curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
+          fi
+          python3.12 -m pip install --user --disable-pip-version-check "maturin>=1.16,<2"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build the worker wheel
+        env:
+          PYO3_PYTHON: /usr/bin/python3.12
+          ARQ_AUDITWHEEL: repair
+        run: scripts/build-worker-wheel.sh
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-arq-rs-worker-${{ matrix.target }}
@@ -56,11 +76,14 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      # checkout writes a lightweight tag even when the remote tag is annotated,
+      # so cat-file would see a commit. Fetch the tag object before the check.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Require an annotated tag
         run: |
+          git fetch origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" --force
           kind=$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")
           if [ "$kind" != "tag" ]; then
             echo "${GITHUB_REF_NAME} is a ${kind}. Publish accepts an annotated v* tag only." >&2
@@ -95,6 +118,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          skip-existing: true
 
   publish-arq-rs-worker:
     name: publish arq-rs-worker
@@ -123,11 +147,14 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          skip-existing: true
 
   smoke:
     name: clean venv smoke
     needs: [arq-rs, arq-rs-worker]
-    runs-on: ubuntu-latest
+    # ubuntu-latest is 26.04 and has no python3.12 package. The worker
+    # wheel is linked against the 24.04 libpython.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -138,4 +165,10 @@ jobs:
       - name: Install both wheels of one version and import them
         env:
           SMOKE_ARCH: x86_64
-        run: scripts/smoke-venv.sh artifacts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3.12 python3.12-venv
+          mkdir -p "$RUNNER_TEMP/py312"
+          ln -sfn /usr/bin/python3.12 "$RUNNER_TEMP/py312/python3"
+          export PATH="$RUNNER_TEMP/py312:$PATH"
+          scripts/smoke-venv.sh artifacts

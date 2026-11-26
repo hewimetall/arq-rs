@@ -90,17 +90,25 @@ else
   maturin="${root}/.venv-maturin/bin/maturin"
 fi
 
-# bindings = bin. extension-module stays off. auditwheel is skipped so a
+# bindings = bin. extension-module stays off. auditwheel defaults to skip so a
 # missing patchelf or a network fetch does not hide the cargo binary.
 # --manifest-path is the Cargo.toml. Maturin reads the pyproject.toml beside it
 # (bindings = bin) and does not pass --features extension-module.
+# ARQ_AUDITWHEEL=repair vendors libpython and emits a manylinux tag.
+# The default skip leaves the cargo binary in place when patchelf is absent.
+# PyPI rejects a binary wheel tagged linux_*.
+auditwheel_mode=${ARQ_AUDITWHEEL:-skip}
+set -- build --release --manifest-path crates/arq-worker/Cargo.toml --out dist --auditwheel "$auditwheel_mode"
 if [ -n "$triple" ]; then
-  maturin_ok=0
-  "$maturin" build --release --target "$triple" --manifest-path crates/arq-worker/Cargo.toml --out dist --auditwheel skip && maturin_ok=1
-else
-  maturin_ok=0
-  "$maturin" build --release --manifest-path crates/arq-worker/Cargo.toml --out dist --auditwheel skip && maturin_ok=1
+  set -- "$@" --target "$triple"
 fi
+# PYO3_PYTHON selects the shared libpython. Without it maturin picks
+# whichever python3 is first on PATH.
+if [ -n "${PYO3_PYTHON:-}" ]; then
+  set -- "$@" -i "$PYO3_PYTHON"
+fi
+maturin_ok=0
+"$maturin" "$@" && maturin_ok=1
 if [ "$maturin_ok" -ne 1 ]; then
   echo "arq-rs-worker wheel build failed." >&2
   echo "The release binary is still ${built} and dist/arq-worker." >&2
