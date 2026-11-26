@@ -227,7 +227,13 @@ fn key_names_and_named_errors() {
     assert_eq!(keys.job(&task()), format!("q:{{default}}:job:{TASK}"));
     assert_eq!(keys.uniq("item:1001").unwrap(), "q:{default}:uniq:item:1001");
     assert_eq!(keys.receipt(&op()), format!("q:{{default}}:receipt:{OP}"));
+    assert_eq!(keys.quarantine(), "q:{default}:quarantine");
+    assert_eq!(keys.qreason(), "q:{default}:qreason");
+    assert_eq!(keys.halted(), "q:{default}:halted");
     assert!(is_shared_index(&keys.ready()));
+    assert!(is_shared_index(&keys.quarantine()));
+    assert!(is_shared_index(&keys.qreason()));
+    assert!(!is_shared_index(&keys.halted()));
     assert!(!is_shared_index(&keys.job(&task())));
     assert!(!is_shared_index(&keys.uniq("ready").unwrap()));
     assert_eq!(key_kind(&keys.uniq("ready").unwrap()), Some("uniq"));

@@ -1,6 +1,6 @@
 # Наблюдаемость
 
-Статус: нормативный контракт от 2026-11-23. Имена `dramatiq_*` записывает `python/arq_rs/metrics.py`, каталог multiprocess задаёт `python/arq_rs/multiproc.py`. Имена `arq_*` ниже остаются контрактом: крейты Rust эти ряды не выпускают. Расхождение с документом оформляется ADR.
+Статус: нормативный контракт от 2026-11-23. Имена `dramatiq_*` записывает `python/arq_rs/metrics.py`, каталог multiprocess задаёт `python/arq_rs/multiproc.py`. `arq_storage_inconsistent` и `arq_quarantine_total` записывает тот же модуль, когда child видит halt или карантин. Остальные имена `arq_*` остаются контрактом и крейтами Rust не выпускаются. Расхождение с документом оформляется ADR.
 
 Профиль simple-q и Dramatiq сохраняется: те же имена, те же labels `queue_name` и `actor_name`, тот же смысл счётчиков. `queue_name` канонический, без суффиксов `.DQ` и `.XQ`. Отдельный тест сверяет этот список и корзины histogram.
 
@@ -43,13 +43,14 @@
 | `arq_child_kill_total` | `queue_name` | `SIGKILL`, который послал этот supervisor |
 | `arq_control_commands_total` | `queue_name`, `op`, `status` | `cancel`, `kill`, `requeue`, `settle` и статус ответа |
 | `arq_operations_indeterminate_total` | `queue_name`, `op` | `IndeterminateOperation` |
-| `arq_storage_inconsistent` | `queue_name` | gauge 1, пока процесс остановил изменения очереди |
+| `arq_storage_inconsistent` | `queue_name` | gauge 1 после того, как этот child увидел halted очередь |
+| `arq_quarantine_total` | `queue_name`, `reason` | counter переносов в `q:{queue}:quarantine`; `reason` — `missing_hash`, `hash_type`, `task_id` |
 
 `arq_queue_depth{state="ready"}` считает члены `q:{queue}:ready` со score не выше Redis `TIME` на момент снятия. `state="scheduled"` считает остальные члены того же ZSET. Ряды не пересекаются и в сумме дают `ZCARD`. `ARQ_MAX_READY` сравнивается с этой суммой, а не с одним рядом `ready`. Задача переходит из `scheduled` в `ready` с ходом времени, без записи в Redis. `inflight`, `done` и `dead` читаются из своих ключей и в эту сумму не входят.
 
 `slot` в RSS — номер слота supervisor, не идентификатор задачи. После смерти child gauge RSS этого слота снимается, а `dramatiq_messages_inprogress` уменьшается снятием multiprocess-файла слота. Завышенный gauge после смерти child тестом запрещён.
 
-Общий multiprocess-экспорт рядов `arq_*` и метрик Python не собран. `python/arq_rs/metrics.py` записывает `dramatiq_*`. Крейты Rust ряды `arq_*` не выпускают. Сведение задаёт отдельный ADR. Имена и labels выше не меняются.
+`arq_storage_inconsistent` и `arq_quarantine_total` пишутся в процессный реестр `python/arq_rs/metrics.py` из child. Rust по-прежнему не держит экспортёр Prometheus. Общий multiprocess-экспорт остальных рядов `arq_*` не собран. Имена и labels выше не меняются. `task_id` в label карантина не входит.
 
 Ожидание в очереди считается от `available_at_ms` до успешного claim и попадает в histogram `arq_queue_wait_milliseconds` с label `queue_name`.
 

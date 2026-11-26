@@ -28,7 +28,7 @@ pub fn key_kind(key: &str) -> Option<&str> {
 }
 
 pub fn is_shared_index(key: &str) -> bool {
-    matches!(key_kind(key), Some("ready" | "inflight" | "done" | "dead"))
+    matches!(key_kind(key), Some("ready" | "inflight" | "done" | "dead" | "quarantine" | "qreason"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,5 +78,20 @@ impl QueueKeys {
 
     pub fn receipt(&self, operation_id: &OperationId) -> String {
         format!("q:{{{}}}:receipt:{operation_id}", self.queue)
+    }
+
+    /// Members that cannot be claimed: missing hash, wrong hash type, or an unparseable id.
+    pub fn quarantine(&self) -> String {
+        format!("q:{{{}}}:quarantine", self.queue)
+    }
+
+    /// Reason for each quarantined member. Field is the index member, value is the reason.
+    pub fn qreason(&self) -> String {
+        format!("q:{{{}}}:qreason", self.queue)
+    }
+
+    /// Systemic halt. The value is the detail that stopped the queue.
+    pub fn halted(&self) -> String {
+        format!("q:{{{}}}:halted", self.queue)
     }
 }

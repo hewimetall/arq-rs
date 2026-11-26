@@ -8,6 +8,7 @@
 //! Each held delivery owns one `AttemptLifecycle`. Finish, renew, and ping read
 //! that state. Redis still decides whether the lease is held.
 
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -16,14 +17,14 @@ use pyo3::prelude::*;
 
 use arq_core::{
     AdmissionGate, AttemptEvent, AttemptLifecycle, AttemptTransitionError, CanonicalUuid,
-    ClaimAdmission, CycleId, DeliveryToken, ExecutionState, FinishState, Json, LoopEvent, MessageId,
-    ObservedTask, OperationId, OutcomeProposal, OwnershipState, ParsedOutcome, PingWatch, TaskId,
-    CONFIG_EXIT_CODE,
+    ClaimAdmission, CycleId, DeliveryToken, ExecutionState, FinishState, Json, LoopEvent,
+    MessageId, ObservedTask, OperationId, OutcomeProposal, OwnershipState, ParsedOutcome,
+    PingWatch, TaskId, CONFIG_EXIT_CODE,
 };
 use arq_pybridge::{
     action_for, dispatch_json, invoke_note_dead, note_dead_after_commit, ping_running_loop,
-    record_outcome, saw_drain, saw_int, saw_term, spawn_event_loop, stop_event_loop, CommitAction,
-    DispatchRaw,
+    record_outcome, record_quarantine, record_storage_inconsistent, saw_drain, saw_int, saw_term,
+    spawn_event_loop, stop_event_loop, CommitAction, DispatchRaw,
 };
 use arq_redis::{
     BackendError, ClaimRequest, ClaimResult, FinishRequest, FinishResult, RedisBackend,
@@ -41,6 +42,7 @@ const DEFAULT_TIME_LIMIT_MS: u64 = 1_800_000;
 static BEGIN_FINISH_COUNT: AtomicU64 = AtomicU64::new(0);
 static FINISH_TERMINAL: AtomicU64 = AtomicU64::new(0);
 static FINISH_TRANSPORT_FAULTS: AtomicU64 = AtomicU64::new(0);
+static HALT_LOGS: AtomicU64 = AtomicU64::new(0);
 
 const FINISH_CONFIRMED: u64 = 1;
 const FINISH_REJECTED: u64 = 2;
@@ -69,6 +71,23 @@ pub fn production_finish_terminal() -> Option<&'static str> {
 #[doc(hidden)]
 pub fn fail_next_finish_transports(count: u64) {
     FINISH_TRANSPORT_FAULTS.store(count, Ordering::SeqCst);
+}
+
+/// How many times this process logged a halted claim. One line per queue.
+#[doc(hidden)]
+pub fn production_halt_log_count() -> u64 {
+    HALT_LOGS.load(Ordering::SeqCst)
+}
+
+/// Read one `arq_*` sample recorded by this process.
+#[doc(hidden)]
+pub fn production_arq_metric(name: &str, queue: &str, reason: &str) -> f64 {
+    Python::attach(|py| {
+        py.import("arq_rs.metrics")
+            .and_then(|metrics| metrics.call_method1("arq_value", (name, queue, reason)))
+            .and_then(|value| value.extract())
+            .unwrap_or(0.0)
+    })
 }
 
 struct Held {
@@ -146,6 +165,7 @@ async fn deliver(
     let mut cursor = 0usize;
     let mut idle_queues = 0usize;
     let mut next_claim = Instant::now();
+    let mut halt_logged = BTreeSet::new();
     let tick = Duration::from_millis(plan.config.lifecycle_interval_ms.max(1));
     let mut interval = tokio::time::interval(tick);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -200,6 +220,7 @@ async fn deliver(
                 &mut draining,
                 &mut drain_started,
                 &mut transport_used,
+                &mut halt_logged,
             )
             .await
             {
@@ -216,6 +237,11 @@ async fn deliver(
                     }
                 }
                 ClaimStep::Again => idle_queues = 0,
+                ClaimStep::Wait => {
+                    idle_queues = 0;
+                    next_claim =
+                        Instant::now() + Duration::from_millis(plan.config.poll_interval_ms.max(1));
+                }
                 ClaimStep::Stop(code) => {
                     return leave(
                         code,
@@ -234,6 +260,8 @@ enum ClaimStep {
     Hold(Held),
     Idle,
     Again,
+    /// Queue is halted. The next claim waits `poll_interval_ms`.
+    Wait,
     Stop(i32),
 }
 
@@ -250,6 +278,7 @@ async fn claim_one(
     draining: &mut bool,
     drain_started: &mut Option<Instant>,
     transport_used: &mut u64,
+    halt_logged: &mut BTreeSet<String>,
 ) -> ClaimStep {
     if gate.blocks_claim() {
         return ClaimStep::Stop(0);
@@ -266,6 +295,7 @@ async fn claim_one(
             lease_ms: plan.config.lease_ms,
         })
         .await;
+    publish_quarantine(backend);
     if note_drain(watch, gate, draining) && drain_started.is_none() {
         *drain_started = Some(Instant::now());
     }
@@ -321,6 +351,13 @@ async fn claim_one(
         Err(error) => {
             if stop_requested(watch) {
                 ClaimStep::Stop(0)
+            } else if matches!(error, BackendError::Halted { .. }) {
+                if halt_logged.insert(queue.clone()) {
+                    HALT_LOGS.fetch_add(1, Ordering::SeqCst);
+                    eprintln!("arq-worker: claim halted queue={queue}");
+                    note_halt_metric(&queue);
+                }
+                ClaimStep::Wait
             } else if let Some(code) =
                 exit_for_storage(&error, transport_used, plan.config.watch_retries)
             {
@@ -331,6 +368,28 @@ async fn claim_one(
             }
         }
     }
+}
+
+fn publish_quarantine(backend: &RedisBackend) {
+    let notes = backend.drain_quarantine();
+    if notes.is_empty() {
+        return;
+    }
+    Python::attach(|py| {
+        for (queue, reason) in notes {
+            if let Err(error) = record_quarantine(py, &queue, &reason) {
+                eprintln!("arq-worker: quarantine metric: {error}");
+            }
+        }
+    });
+}
+
+fn note_halt_metric(queue: &str) {
+    Python::attach(|py| {
+        if let Err(error) = record_storage_inconsistent(py, queue) {
+            eprintln!("arq-worker: inconsistent metric: {error}");
+        }
+    });
 }
 
 fn hold_delivery(
@@ -453,7 +512,11 @@ async fn poll_ping(
     if decision.request_cancel {
         if let Err(error) = apply_attempt(current, AttemptEvent::RequestCancel) {
             eprintln!("arq-worker: {error}");
-            return Some(decision.exit_code.unwrap_or(arq_core::PING_BUDGET_EXIT_CODE));
+            return Some(
+                decision
+                    .exit_code
+                    .unwrap_or(arq_core::PING_BUDGET_EXIT_CODE),
+            );
         }
     }
     decision.exit_code

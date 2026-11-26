@@ -42,7 +42,7 @@ QueueControl → cancel / kill / requeue / settle
 - На одном child одновременно выполняется одна задача.
 - Supervisor не инициализирует CPython.
 - Rust — единственный владелец транспортных переходов. Python возвращает предложение исхода.
-- Отдельный recovery-sweeper не запускается. Чтение состояния данные не исправляет.
+- Отдельный recovery-sweeper не запускается. Чтение состояния данные не исправляет. Битый член очереди переносится в карантин и очередь не останавливает. Halt очереди пишется в Redis только для системной ошибки. См. [ADR 0009](adr/0009-quarantine-and-persisted-halt.md).
 - Signal handler процесса, который перезапускает child, устанавливается до инициализации Python в этом процессе. Родительский supervisor CPython не инициализирует и вооружает `SIGTERM` и `SIGINT` до запуска слотов. Child инициализирует интерпретатор с `install_signal_handlers = 0`.
 
 Подробности транспорта — в [operations.md](operations.md), ключей — в [redis-keys.md](redis-keys.md), состава крейтов и дистрибуции — в [ADR 0008](adr/0008-sans-io-workspace-crates.md).

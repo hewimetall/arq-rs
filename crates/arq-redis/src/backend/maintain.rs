@@ -181,7 +181,7 @@ mod tests {
         let _ = backend.note_inconsistent(StorageInconsistency {
             queue: "default".into(),
             operation_id: None,
-            detail: "coverage".into(),
+            detail: "EXEC array was the wrong length or contained a command error".into(),
         });
         let task = TaskId::from_uuid(CanonicalUuid::from_random_v4([9; 16]));
         let error = backend.delete_terminal("default", Index::Dead, task).unwrap_err();

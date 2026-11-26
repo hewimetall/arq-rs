@@ -98,6 +98,10 @@ impl Session {
         }
     }
 
+    pub(crate) fn set(&mut self, key: &str, value: &str) -> Result<(), Fail> {
+        self.ok(&cmd("SET").arg(key).arg(value).clone())
+    }
+
     pub(crate) fn get(&mut self, key: &str) -> Result<Option<String>, Fail> {
         match self.call(&cmd("GET").arg(key).clone())? {
             Value::Nil => Ok(None),
@@ -426,7 +430,9 @@ pub(crate) fn expected_type(key: &str) -> Option<&'static str> {
     match arq_core::key_kind(key) {
         Some("job") => Some("hash"),
         Some("receipt" | "uniq") => Some("string"),
-        Some("ready" | "inflight" | "done" | "dead") => Some("zset"),
+        Some("ready" | "inflight" | "done" | "dead" | "quarantine") => Some("zset"),
+        Some("qreason") => Some("hash"),
+        Some("halted") => Some("string"),
         _ => None,
     }
 }
@@ -486,6 +492,9 @@ mod tests {
         assert_eq!(expected_type("q:{default}:done"), Some("zset"));
         assert_eq!(expected_type("q:{default}:dead"), Some("zset"));
         assert_eq!(expected_type("q:{default}:dead:tag:batch-a"), Some("zset"));
+        assert_eq!(expected_type("q:{default}:quarantine"), Some("zset"));
+        assert_eq!(expected_type("q:{default}:qreason"), Some("hash"));
+        assert_eq!(expected_type("q:{default}:halted"), Some("string"));
         assert_eq!(expected_type("outside"), None);
         assert_eq!(queue_of("q:{default}:ready").as_deref(), Some("default"));
         assert!(queue_of("ready").is_none());

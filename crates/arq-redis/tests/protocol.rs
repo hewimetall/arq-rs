@@ -27,7 +27,9 @@ fn runtime() -> &'static tokio::runtime::Runtime {
 fn harness<T>(fut: impl std::future::Future<Output = T>) -> T {
     let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     flush();
-    runtime().block_on(fut)
+    let result = runtime().block_on(fut);
+    flush();
+    result
 }
 
 fn flush() {
@@ -416,7 +418,8 @@ fn partial_exec_halts_and_does_not_repair() {
         assert_eq!(info.state, "ready");
         assert!(!info.missing_job);
         let fresh = open_backend(&[]);
-        assert!(!fresh.is_halted("default"));
+        assert!(fresh.is_halted("default"));
+        assert!(get("q:{default}:halted").is_some());
         assert_eq!(fresh.storage_inconsistent_count(), 0);
         let still = fresh.admin("default").get(&ident(10).task_id.to_string()).await.unwrap().unwrap();
         assert_eq!(still.actor_name, "process_item");
@@ -1103,7 +1106,7 @@ fn ownership_lost_when_the_lease_has_already_ended() {
 }
 
 #[test]
-fn maintenance_removes_old_terminal_tasks_and_halts_on_a_live_uniq() {
+fn maintenance_removes_old_terminal_tasks_and_refuses_a_live_uniq() {
     harness(async {
         let backend = open_backend(&[("ARQ_MAINTENANCE_BATCH", "1")]);
         for n in [81_u128, 82] {
@@ -1160,11 +1163,11 @@ fn maintenance_removes_old_terminal_tasks_and_halts_on_a_live_uniq() {
         let _: () = redis::cmd("SET").arg("q:{default}:uniq:item:83").arg(task_id.to_string()).query(&mut con).unwrap();
         let error = backend.maintain("default").await.unwrap_err();
         assert!(matches!(error, BackendError::Inconsistent(_)), "{error}");
-        assert!(backend.is_halted("default"));
+        assert!(!backend.is_halted("default"));
         assert_eq!(hget(&job_key(83), "state").as_deref(), Some("done"));
         assert_eq!(get("q:{default}:uniq:item:83").as_deref(), Some(task_id.to_string().as_str()));
-        let halted = backend.maintain("default").await.unwrap_err();
-        assert!(matches!(halted, BackendError::Halted { .. }));
+        let again = backend.maintain("default").await.unwrap_err();
+        assert!(matches!(again, BackendError::Inconsistent(_)));
     });
 }
 
@@ -1330,6 +1333,215 @@ fn invalid_outcome_and_skipped_finish_write_the_documented_fields() {
         assert_eq!(hget(&job_key(87), "state").as_deref(), Some("dead"));
         let proposal = outcome(r#"{"outcome":"ok"}"#);
         assert!(matches!(proposal, ParsedOutcome::Invalid(_) | ParsedOutcome::Proposal(OutcomeProposal::Ok) | ParsedOutcome::Proposal(_)));
+    });
+}
+
+#[test]
+fn a_broken_member_is_quarantined_and_the_next_task_is_claimed() {
+    harness(async {
+        let backend = open_backend(&[]);
+        let EnqueueResult::Enqueued {
+            task_id: missing, ..
+        } = enqueue(&backend, job(9300, None, 0)).await
+        else {
+            panic!("enqueue")
+        };
+        let EnqueueResult::Enqueued {
+            task_id: healthy, ..
+        } = enqueue(&backend, job(9301, None, 0)).await
+        else {
+            panic!("enqueue")
+        };
+        let mut con = conn();
+        let _: i64 = redis::cmd("ZADD")
+            .arg("q:{default}:ready")
+            .arg(1)
+            .arg(missing.to_string())
+            .query(&mut con)
+            .unwrap();
+        let _: i64 = redis::cmd("DEL")
+            .arg(job_key(9300))
+            .query(&mut con)
+            .unwrap();
+        let claimed = claim_to(&backend, 9301, 15_000).await;
+        assert_eq!(delivered(&claimed).task_id, Some(healthy));
+        assert!(zscore("q:{default}:quarantine", &missing.to_string()).is_some());
+        assert!(zscore("q:{default}:ready", &missing.to_string()).is_none());
+        assert_eq!(
+            hget("q:{default}:qreason", &missing.to_string()).as_deref(),
+            Some("missing_hash")
+        );
+        assert!(!backend.is_halted("default"));
+        assert!(get("q:{default}:halted").is_none());
+        let fresh = open_backend(&[]);
+        assert!(!fresh.is_halted("default"));
+        let idle = fresh
+            .claim(ClaimRequest {
+                operation_id: op(9302),
+                message_id: message(9302),
+                queue: "default".into(),
+                worker_id: "worker-9302".into(),
+                proposed_token: token(9302),
+                lease_ms: 15_000,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(idle, ClaimResult::Idle), "{idle:?}");
+        let notes = backend.drain_quarantine();
+        assert!(notes
+            .iter()
+            .any(|(queue, reason)| queue == "default" && reason == "missing_hash"));
+
+        let EnqueueResult::Enqueued { task_id: typed, .. } =
+            enqueue(&backend, job(9400, None, 0)).await
+        else {
+            panic!("enqueue")
+        };
+        let EnqueueResult::Enqueued {
+            task_id: after_type,
+            ..
+        } = enqueue(&backend, job(9401, None, 0)).await
+        else {
+            panic!("enqueue")
+        };
+        let _: () = redis::cmd("SET")
+            .arg(job_key(9400))
+            .arg("not-a-hash")
+            .query(&mut con)
+            .unwrap();
+        let _: i64 = redis::cmd("ZADD")
+            .arg("q:{default}:ready")
+            .arg(1)
+            .arg(typed.to_string())
+            .query(&mut con)
+            .unwrap();
+        let claimed = claim_to(&backend, 9401, 15_000).await;
+        assert_eq!(delivered(&claimed).task_id, Some(after_type));
+        assert_eq!(
+            hget("q:{default}:qreason", &typed.to_string()).as_deref(),
+            Some("hash_type")
+        );
+        assert!(!backend.is_halted("default"));
+
+        let _: i64 = redis::cmd("ZADD")
+            .arg("q:{default}:ready")
+            .arg(1)
+            .arg("not-a-uuid")
+            .query(&mut con)
+            .unwrap();
+        let EnqueueResult::Enqueued {
+            task_id: after_id, ..
+        } = enqueue(&backend, job(9500, None, 0)).await
+        else {
+            panic!("enqueue")
+        };
+        let claimed = claim_to(&backend, 9500, 15_000).await;
+        assert_eq!(delivered(&claimed).task_id, Some(after_id));
+        assert_eq!(
+            hget("q:{default}:qreason", "not-a-uuid").as_deref(),
+            Some("task_id")
+        );
+        assert!(zscore("q:{default}:ready", "not-a-uuid").is_none());
+        assert!(!fresh.is_halted("default"));
+    });
+}
+
+#[test]
+fn blocked_inflight_pages_do_not_hide_a_ready_task() {
+    harness(async {
+        let backend = open_backend(&[]);
+        let mut con = conn();
+        for n in 0..17u128 {
+            let id = 4_100 + n;
+            let EnqueueResult::Enqueued { task_id, .. } = enqueue(&backend, job(id, None, 0)).await
+            else {
+                panic!("enqueue")
+            };
+            let member = task_id.to_string();
+            let _: i64 = redis::cmd("HSET")
+                .arg(job_key(id))
+                .arg("control_op")
+                .arg("cancel")
+                .arg("state")
+                .arg("inflight")
+                .arg("lease_deadline_ms")
+                .arg("1")
+                .query(&mut con)
+                .unwrap();
+            let _: i64 = redis::cmd("ZREM")
+                .arg("q:{default}:ready")
+                .arg(&member)
+                .query(&mut con)
+                .unwrap();
+            let _: i64 = redis::cmd("ZADD")
+                .arg("q:{default}:inflight")
+                .arg(1)
+                .arg(&member)
+                .query(&mut con)
+                .unwrap();
+        }
+        let EnqueueResult::Enqueued { task_id, .. } = enqueue(&backend, job(4900, None, 0)).await
+        else {
+            panic!("enqueue")
+        };
+        let claimed = claim_to(&backend, 4900, 15_000).await;
+        assert_eq!(delivered(&claimed).task_id, Some(task_id));
+        assert_eq!(zcard("q:{default}:inflight"), 18);
+        assert!(!backend.is_halted("default"));
+    });
+}
+
+#[test]
+fn renew_and_finish_proceed_while_the_queue_is_halted() {
+    harness(async {
+        let backend = open_backend(&[]);
+        let EnqueueResult::Enqueued { task_id, .. } = enqueue(&backend, job(9600, None, 0)).await
+        else {
+            panic!("enqueue")
+        };
+        let claimed = claim_to(&backend, 9600, 15_000).await;
+        let _ = delivered(&claimed);
+        let mut con = conn();
+        let _: () = redis::cmd("SET")
+            .arg("q:{default}:halted")
+            .arg("during-handler")
+            .query(&mut con)
+            .unwrap();
+        assert!(backend.is_halted("default"));
+        let renewed = backend
+            .renew(RenewRequest {
+                operation_id: op(9601),
+                message_id: message(9600),
+                queue: "default".into(),
+                task_id,
+                cycle_id: cycle(9600),
+                delivery_token: token(9600),
+                lease_ms: 15_000,
+            })
+            .await
+            .unwrap();
+        assert!(
+            matches!(renewed, arq_redis::RenewResult::Renewed { .. }),
+            "{renewed:?}"
+        );
+        backend
+            .finish(FinishRequest {
+                operation_id: op(9602),
+                message_id: message(9600),
+                queue: "default".into(),
+                task_id,
+                cycle_id: cycle(9600),
+                delivery_token: token(9600),
+                proposal: outcome(r#"{"outcome":"ok"}"#),
+            })
+            .await
+            .unwrap();
+        assert_eq!(hget(&job_key(9600), "state").as_deref(), Some("done"));
+        assert_eq!(hget(&job_key(9600), "result").as_deref(), Some("ok"));
+        let halted = backend.enqueue(job(9603, None, 0)).await.unwrap_err();
+        assert!(matches!(halted, BackendError::Halted { .. }), "{halted}");
+        let fresh = open_backend(&[]);
+        assert!(fresh.is_halted("default"));
     });
 }
 

@@ -73,7 +73,7 @@ pub fn classify_exec(reply: ExecReply) -> ExecClass {
     }
 }
 
-/// Candidates taken from one poll. A lost race on one candidate does not shrink this.
+/// Page size for one claim scan. Skipped and quarantined members do not consume it.
 pub const CLAIM_CANDIDATE_WINDOW: usize = 16;
 
 /// Renew could not be confirmed, or ownership was already lost.
