@@ -1,6 +1,6 @@
 # Ключи Redis
 
-Статус: нормативный контракт от 2026-11-23. Имена ключей очереди собирает `QueueKeys` в `crates/arq-core/src/keys.rs`. `RedisBackend` пишет `q:{queue}:ready`, `inflight`, `done`, `dead`, `dead:tag`, `job`, `uniq` и `receipt`. Реестр `arq:supervisors`, hash `arq:supervisor:{hostname}.{pid}` и hash `arq:supervisor:{hostname}.{pid}:child:{slot}` пишет `arq-supervisor` через `RedisBackend`. Расхождение с документом оформляется ADR.
+Статус: нормативный контракт от 2026-11-23. Имена ключей очереди собирает `QueueKeys` в `crates/arq-core/src/keys.rs`. `RedisBackend` пишет `q:{queue}:ready`, `inflight`, `done`, `dead`, `dead:tag`, `job`, `uniq`, `receipt`, `quarantine`, `qreason` и `halted`. Реестр `arq:supervisors`, hash `arq:supervisor:{hostname}.{pid}` и hash `arq:supervisor:{hostname}.{pid}:child:{slot}` пишет `arq-supervisor` через `RedisBackend`. Расхождение с документом оформляется ADR.
 
 ## Hash slot
 
@@ -24,6 +24,9 @@
 | `q:{queue}:dead` | ZSET | член — `task_id`, score — время перехода в DLQ, Unix ms |
 | `q:{queue}:dead:tag:{tag}` | ZSET | тот же член и score для задач с tag |
 | `q:{queue}:receipt:{operation_id}` | STRING | канонический JSON запроса и результата |
+| `q:{queue}:quarantine` | ZSET | член, который нельзя выдать: нет hash, hash не того типа или `task_id` не разбирается. Score — Unix ms переноса |
+| `q:{queue}:qreason` | HASH | поле — член карантина, значение — `missing_hash`, `hash_type`, `task_id` или `job_fields` |
+| `q:{queue}:halted` | STRING | причина системного halt. Ключ отсутствует, пока очередь не остановлена |
 
 Отдельной записи delivery нет. Текущая доставка лежит в hash задачи.
 

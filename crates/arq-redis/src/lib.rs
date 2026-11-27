@@ -15,7 +15,7 @@ mod types;
 #[cfg(test)]
 mod scripted;
 
-pub use backend::{QueueAdmin, RedisBackend};
+pub use backend::{halts_the_queue, QueueAdmin, RedisBackend};
 pub use error::BackendError;
 pub use types::{
     ChildRegistration, ChildView, ClaimRequest, ClaimResult, ControlRequest, ControlResult, Delivery, EnqueueJob,

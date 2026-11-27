@@ -41,6 +41,10 @@ struct Inner {
     resp3: bool,
     config: Config,
     halted: Mutex<std::collections::BTreeSet<String>>,
+    /// Resume point for the next claim scan of one index. One poll does not reread the whole due set.
+    scan_offset: Mutex<HashMap<String, usize>>,
+    /// `(queue, reason)` notes from quarantine moves. The child drains them into metrics.
+    quarantine: Mutex<Vec<(String, String)>>,
     inconsistent: AtomicU64,
     fault: Mutex<Fault>,
     routes: Mutex<HashMap<String, Route>>,
@@ -61,6 +65,8 @@ impl RedisBackend {
                 resp3: url.contains("protocol=resp3") || url.contains("protocol=3"),
                 config,
                 halted: Mutex::new(std::collections::BTreeSet::new()),
+                scan_offset: Mutex::new(HashMap::new()),
+                quarantine: Mutex::new(Vec::new()),
                 inconsistent: AtomicU64::new(0),
                 fault: Mutex::new(Fault::default()),
                 routes: Mutex::new(HashMap::new()),
@@ -73,15 +79,110 @@ impl RedisBackend {
     }
 
     pub fn set_fault(&self, fault: Fault) {
-        *self.inner.fault.lock().unwrap_or_else(|error| error.into_inner()) = fault;
+        *self
+            .inner
+            .fault
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = fault;
     }
 
     pub fn is_halted(&self, queue: &str) -> bool {
+        if self.halt_cached(queue) {
+            return true;
+        }
+        self.load_persisted_halt(queue)
+    }
+
+    /// Quarantine moves since the previous drain. Each item is `(queue, reason)`.
+    pub fn drain_quarantine(&self) -> Vec<(String, String)> {
+        std::mem::take(
+            &mut *self
+                .inner
+                .quarantine
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        )
+    }
+
+    fn halt_cached(&self, queue: &str) -> bool {
         self.inner
             .halted
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .contains(queue)
+    }
+
+    fn cache_halt(&self, queue: &str) {
+        self.inner
+            .halted
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(queue.to_string());
+    }
+
+    /// `q:{queue}:halted` survives a child restart. A missing key or a connection error is not a halt.
+    fn load_persisted_halt(&self, queue: &str) -> bool {
+        let Ok(keys) = QueueKeys::new(queue) else {
+            return false;
+        };
+        let Ok(mut session) = self.open_session(queue) else {
+            return false;
+        };
+        match session.get(&keys.halted()) {
+            Ok(Some(_)) => {
+                self.cache_halt(queue);
+                true
+            }
+            Ok(None) => false,
+            Err(Fail::Io(detail)) if detail.contains("WRONGTYPE") => {
+                self.cache_halt(queue);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// `true` only after Redis accepted `SET`. A failed write is not a halt.
+    fn persist_halt(&self, queue: &str, detail: &str) -> bool {
+        let Ok(keys) = QueueKeys::new(queue) else {
+            return false;
+        };
+        let Ok(mut session) = self.open_session(queue) else {
+            return false;
+        };
+        session.set(&keys.halted(), detail).is_ok()
+    }
+
+    pub(crate) fn scan_offset(&self, index: &str) -> usize {
+        self.inner
+            .scan_offset
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(index)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn set_scan_offset(&self, index: &str, offset: usize) {
+        let mut offsets = self
+            .inner
+            .scan_offset
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if offset == 0 {
+            offsets.remove(index);
+        } else {
+            offsets.insert(index.to_string(), offset);
+        }
+    }
+
+    pub(crate) fn note_quarantine(&self, queue: &str, reason: &str) {
+        eprintln!("arq_quarantine_total queue={queue} reason={reason}");
+        self.inner
+            .quarantine
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push((queue.to_string(), reason.to_string()));
     }
 
     /// Process-local count of `arq_storage_inconsistent` observations.
@@ -99,19 +200,23 @@ impl RedisBackend {
 
     pub(crate) fn keys(&self, queue: &str) -> Result<QueueKeys, BackendError> {
         if self.is_halted(queue) {
-            return Err(BackendError::Halted { queue: queue.to_string() });
+            return Err(BackendError::Halted {
+                queue: queue.to_string(),
+            });
         }
         QueueKeys::new(queue).map_err(BackendError::Input)
     }
 
     pub(crate) fn note_inconsistent(&self, error: StorageInconsistency) -> BackendError {
-        self.inner
-            .halted
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .insert(error.queue.clone());
         self.inner.inconsistent.fetch_add(1, Ordering::Relaxed);
-        eprintln!("arq_storage_inconsistent queue={} detail={}", error.queue, error.detail);
+        eprintln!(
+            "arq_storage_inconsistent queue={} detail={}",
+            error.queue, error.detail
+        );
+        if halts_the_queue(&error.detail) && !self.halt_cached(&error.queue) && self.persist_halt(&error.queue, &error.detail)
+        {
+            self.cache_halt(&error.queue);
+        }
         BackendError::Inconsistent(error)
     }
 
@@ -140,11 +245,21 @@ impl RedisBackend {
     }
 
     fn cross_slot(&self) -> Option<String> {
-        self.inner.fault.lock().unwrap_or_else(|error| error.into_inner()).cross_slot_watch.clone()
+        self.inner
+            .fault
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .cross_slot_watch
+            .clone()
     }
 
     fn before_hook(&self) -> Option<Arc<dyn Fn(&[String]) + Send + Sync>> {
-        self.inner.fault.lock().unwrap_or_else(|error| error.into_inner()).before_exec.clone()
+        self.inner
+            .fault
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .before_exec
+            .clone()
     }
 
     fn after_zcard(&self) {
@@ -161,7 +276,11 @@ impl RedisBackend {
     }
 
     fn take_exec_fault(&self) -> ExecFault {
-        let mut fault = self.inner.fault.lock().unwrap_or_else(|error| error.into_inner());
+        let mut fault = self
+            .inner
+            .fault
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let exec = fault.exec;
         if exec != ExecFault::None && exec != ExecFault::AbortAlways {
             fault.exec = ExecFault::None;
@@ -184,7 +303,11 @@ impl RedisBackend {
 
     fn open_session(&self, queue: &str) -> Result<Session, Fail> {
         let (url, ask) = {
-            let routes = self.inner.routes.lock().unwrap_or_else(|error| error.into_inner());
+            let routes = self
+                .inner
+                .routes
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             match routes.get(queue) {
                 Some(route) => (route.url.clone(), route.ask),
                 None => (self.inner.url.clone(), false),
@@ -233,6 +356,24 @@ impl RedisBackend {
     pub(crate) fn drive<T>(
         &self,
         queue: &str,
+        once: impl FnMut(&mut Session) -> Result<Step<T>, Fail>,
+    ) -> Result<Drive<T>, BackendError> {
+        self.drive_inner(queue, false, once)
+    }
+
+    /// Renew and finish of a delivery the child already holds. A queue halt does not refuse them.
+    pub(crate) fn drive_held<T>(
+        &self,
+        queue: &str,
+        once: impl FnMut(&mut Session) -> Result<Step<T>, Fail>,
+    ) -> Result<Drive<T>, BackendError> {
+        self.drive_inner(queue, true, once)
+    }
+
+    fn drive_inner<T>(
+        &self,
+        queue: &str,
+        allow_halted: bool,
         mut once: impl FnMut(&mut Session) -> Result<Step<T>, Fail>,
     ) -> Result<Drive<T>, BackendError> {
         let mut budget = WatchBudget::new(self.inner.config.watch_retries);
@@ -242,8 +383,10 @@ impl RedisBackend {
         let limit = self.inner.config.watch_retries;
         let mut session = None;
         loop {
-            if self.is_halted(queue) {
-                return Err(BackendError::Halted { queue: queue.to_string() });
+            if !allow_halted && self.is_halted(queue) {
+                return Err(BackendError::Halted {
+                    queue: queue.to_string(),
+                });
             }
             if session.is_none() {
                 match self.open_session(queue) {
@@ -315,6 +458,30 @@ where
     }
 }
 
+/// Whole-queue halt is only for a broken shared index, a bad `EXEC`, or `CROSSSLOT`.
+pub fn halts_the_queue(detail: &str) -> bool {
+    if detail == "CROSSSLOT on queue keys"
+        || detail.contains("EXEC array was the wrong length or contained a command error")
+    {
+        return true;
+    }
+    let Some(rest) = detail.strip_prefix("key ") else {
+        return false;
+    };
+    let Some((key, after)) = rest.split_once(" has type ") else {
+        return false;
+    };
+    after.contains(", expected ") && arq_core::is_shared_index(key)
+}
+
+pub(crate) fn inconsistency(
+    queue: &str,
+    operation_id: Option<OperationId>,
+    detail: impl Into<String>,
+) -> BackendError {
+    session::inconsistency(queue, operation_id, detail)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,18 +497,50 @@ mod tests {
 
     #[test]
     fn failures_redirects_and_halt_map_without_repair() {
+        clear_halt("default");
+        clear_halt("haltmap");
+        clear_halt("sloto");
+        clear_halt("slotd");
         let backend = open(&[]);
-        let inconsistent = StorageInconsistency { queue: "default".into(), operation_id: None, detail: "from-fail".into() };
-        assert!(matches!(backend.fail_to_error("default", Fail::Backend(BackendError::Inconsistent(inconsistent))), BackendError::Inconsistent(_)));
-        assert!(matches!(backend.fail_to_error("other", Fail::CrossSlot), BackendError::Inconsistent(_)));
-        assert!(matches!(backend.fail_to_error("default", Fail::Io("down".into())), BackendError::Transport { .. }));
+        let inconsistent = StorageInconsistency {
+            queue: "default".into(),
+            operation_id: None,
+            detail: "from-fail".into(),
+        };
         assert!(matches!(
-            backend.fail_to_error("default", Fail::Redirect { addr: "127.0.0.1:9".into(), ask: true }),
+            backend.fail_to_error(
+                "default",
+                Fail::Backend(BackendError::Inconsistent(inconsistent))
+            ),
+            BackendError::Inconsistent(_)
+        ));
+        assert!(matches!(
+            backend.fail_to_error("sloto", Fail::CrossSlot),
+            BackendError::Inconsistent(_)
+        ));
+        assert!(matches!(
+            backend.fail_to_error("default", Fail::Io("down".into())),
             BackendError::Transport { .. }
         ));
-        assert!(matches!(backend.absorb(BackendError::Page { detail: "page".into() }), BackendError::Page { .. }));
+        assert!(matches!(
+            backend.fail_to_error(
+                "default",
+                Fail::Redirect {
+                    addr: "127.0.0.1:9".into(),
+                    ask: true
+                }
+            ),
+            BackendError::Transport { .. }
+        ));
+        assert!(matches!(
+            backend.absorb(BackendError::Page {
+                detail: "page".into()
+            }),
+            BackendError::Page { .. }
+        ));
 
-        let resp3 = RedisBackend::connect("redis://127.0.0.1:6379?protocol=resp3", config(&[])).unwrap();
+        let resp3 =
+            RedisBackend::connect("redis://127.0.0.1:6379?protocol=resp3", config(&[])).unwrap();
         resp3.remember("default", "127.0.0.1:6379", true);
         let routes = resp3.inner.routes.lock().unwrap();
         let route = routes.get("default").unwrap();
@@ -350,53 +549,106 @@ mod tests {
         drop(routes);
 
         let halted = open(&[]);
-        let _ = halted.note_inconsistent(StorageInconsistency { queue: "default".into(), operation_id: None, detail: "stop".into() });
-        let error = halted.drive("default", |_| Ok(Step::Done(()))).unwrap_err();
+        let _ = halted.note_inconsistent(StorageInconsistency {
+            queue: "haltmap".into(),
+            operation_id: None,
+            detail: "EXEC array was the wrong length or contained a command error".into(),
+        });
+        let error = halted.drive("haltmap", |_| Ok(Step::Done(()))).unwrap_err();
         assert!(matches!(error, BackendError::Halted { .. }));
+        let restarted = open(&[]);
+        assert!(restarted.is_halted("haltmap"));
+        clear_halt("haltmap");
+        let cleared = open(&[]);
+        assert!(!cleared.is_halted("haltmap"));
 
         let limited = open(&[("ARQ_WATCH_RETRIES", "1")]);
-        let error = limited.drive("default", |_| Err::<Step<()>, _>(Fail::Io("again".into()))).unwrap_err();
+        let error = limited
+            .drive("default", |_| Err::<Step<()>, _>(Fail::Io("again".into())))
+            .unwrap_err();
         assert!(matches!(error, BackendError::Transport { .. }));
-        let error = limited.drive("default", |_| Ok(Step::<()>::Abort)).unwrap_err();
+        let error = limited
+            .drive("default", |_| Ok(Step::<()>::Abort))
+            .unwrap_err();
         assert!(error.to_string().contains("EXECABORT"));
-        let error = limited.drive("default", |_| Ok(Step::<()>::Watch)).unwrap_err();
+        let error = limited
+            .drive("default", |_| Ok(Step::<()>::Watch))
+            .unwrap_err();
         assert!(matches!(error, BackendError::Transaction(_)));
-        assert!(matches!(limited.drive::<()>("default", |_| Ok(Step::Lost)), Ok(Drive::Lost)));
         assert!(matches!(
-            limited.drive("default", |_| Err::<Step<()>, _>(Fail::Backend(BackendError::Page { detail: "p".into() }))),
+            limited.drive::<()>("default", |_| Ok(Step::Lost)),
+            Ok(Drive::Lost)
+        ));
+        assert!(matches!(
+            limited.drive("default", |_| Err::<Step<()>, _>(Fail::Backend(
+                BackendError::Page { detail: "p".into() }
+            ))),
             Err(BackendError::Page { .. })
         ));
         let error = limited
-            .drive("default", |_| Err::<Step<()>, _>(Fail::Redirect { addr: "127.0.0.1:6379".into(), ask: false }))
+            .drive("default", |_| {
+                Err::<Step<()>, _>(Fail::Redirect {
+                    addr: "127.0.0.1:6379".into(),
+                    ask: false,
+                })
+            })
             .unwrap_err();
         assert!(error.to_string().contains("too many cluster redirects"));
         let crossing = open(&[]);
-        assert!(matches!(crossing.drive("default", |_| Err::<Step<()>, _>(Fail::CrossSlot)), Err(BackendError::Inconsistent(_))));
+        assert!(matches!(
+            crossing.drive("slotd", |_| Err::<Step<()>, _>(Fail::CrossSlot)),
+            Err(BackendError::Inconsistent(_))
+        ));
 
         let reading = open(&[]);
         let error = reading
-            .with_session("default", |_| Err::<(), _>(Fail::Redirect { addr: "127.0.0.1:1".into(), ask: true }))
+            .with_session("default", |_| {
+                Err::<(), _>(Fail::Redirect {
+                    addr: "127.0.0.1:1".into(),
+                    ask: true,
+                })
+            })
             .unwrap_err();
         assert!(matches!(error, BackendError::Transport { .. }));
         reading.remember("default", "127.0.0.1:6379", false);
-        let error = reading.with_session("default", |_| Err::<(), _>(Fail::CrossSlot)).unwrap_err();
+        let error = reading
+            .with_session("slotd", |_| Err::<(), _>(Fail::CrossSlot))
+            .unwrap_err();
         assert!(matches!(error, BackendError::Inconsistent(_)));
-        let error = reading.with_session("default", |_| Err::<(), _>(Fail::Backend(BackendError::Page { detail: "p".into() }))).unwrap_err();
+        let error = reading
+            .with_session("default", |_| {
+                Err::<(), _>(Fail::Backend(BackendError::Page { detail: "p".into() }))
+            })
+            .unwrap_err();
         assert!(matches!(error, BackendError::Page { .. }));
         reading.remember("cover", "127.0.0.1:1", false);
         let error = reading.with_session("cover", |_| Ok(())).unwrap_err();
         assert!(matches!(error, BackendError::Transport { .. }));
 
-        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
-        let error = runtime.block_on(block_on(|| -> Result<(), BackendError> { panic!("blocked") })).unwrap_err();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let error = runtime
+            .block_on(block_on(|| -> Result<(), BackendError> {
+                panic!("blocked")
+            }))
+            .unwrap_err();
         assert!(matches!(error, BackendError::Transport { .. }));
+        clear_halt("sloto");
+        clear_halt("slotd");
+        clear_halt("haltmap");
     }
-}
 
-pub(crate) fn inconsistency(
-    queue: &str,
-    operation_id: Option<OperationId>,
-    detail: impl Into<String>,
-) -> BackendError {
-    session::inconsistency(queue, operation_id, detail)
+    fn clear_halt(queue: &str) {
+        let Ok(client) = redis::Client::open("redis://127.0.0.1:6379/1") else {
+            return;
+        };
+        let Ok(mut con) = client.get_connection() else {
+            return;
+        };
+        let _: redis::RedisResult<()> = redis::cmd("DEL")
+            .arg(format!("q:{{{queue}}}:halted"))
+            .query(&mut con);
+    }
 }

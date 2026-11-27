@@ -335,6 +335,16 @@ pub fn invoke_note_dead(
     })
 }
 
+pub fn record_quarantine(py: Python<'_>, queue: &str, reason: &str) -> PyResult<()> {
+    py.import("arq_rs.metrics")?.call_method1("note_quarantine", (queue, reason))?;
+    Ok(())
+}
+
+pub fn record_storage_inconsistent(py: Python<'_>, queue: &str) -> PyResult<()> {
+    py.import("arq_rs.metrics")?.call_method1("note_storage_inconsistent", (queue,))?;
+    Ok(())
+}
+
 pub fn record_outcome(py: Python<'_>, queue: &str, actor: &str, outcome: &arq_core::ParsedOutcome) -> PyResult<()> {
     let metrics = py.import("arq_rs.metrics")?;
     match outcome {

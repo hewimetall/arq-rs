@@ -162,7 +162,7 @@ fn status_receipts_replays_and_input_errors() {
         let _: () = redis::cmd("SET").arg(&receipt).arg("{").query(&mut con).unwrap();
         let error = backend.enqueue(job(314, Some("item:314"), 0)).await.unwrap_err();
         assert!(matches!(error, BackendError::Inconsistent(_)), "{error}");
-        assert!(backend.is_halted("default"));
+        assert!(!backend.is_halted("default"));
     });
 }
 
@@ -271,7 +271,7 @@ fn execabort_and_lost_reply_branches() {
 }
 
 #[test]
-fn wrong_type_halts_and_an_extra_watch_key_is_ignored_on_standalone() {
+fn wrong_receipt_type_is_not_a_queue_halt() {
     super::harness(async {
         let backend = open_backend(&[]);
         let receipt = format!("q:{{default}}:receipt:{}", op(330));
@@ -280,7 +280,7 @@ fn wrong_type_halts_and_an_extra_watch_key_is_ignored_on_standalone() {
         let error = backend.enqueue(job(330, Some("item:330"), 0)).await.unwrap_err();
         assert!(matches!(error, BackendError::Inconsistent(_)), "{error}");
         assert!(error.to_string().contains("type"));
-        assert!(backend.is_halted("default"));
+        assert!(!backend.is_halted("default"));
         let fresh = open_backend(&[]);
         fresh.set_fault(Fault { cross_slot_watch: Some("outside".into()), ..Fault::default() });
         let created = enqueue(&fresh, job(331, Some("item:331"), 0)).await;
@@ -722,7 +722,7 @@ fn decision_arms_pages_and_lost_reply_classification() {
             .unwrap();
         let error = corrupt.enqueue(job(381, None, 0)).await.unwrap_err();
         assert!(matches!(error, BackendError::Inconsistent(_)), "{error}");
-        assert!(corrupt.is_halted("default"));
+        assert!(!corrupt.is_halted("default"));
 
         let _: i64 = redis::cmd("ZADD").arg("arq:supervisors").arg(1).arg("worker.local.8").query(&mut con).unwrap();
         let _: i64 = redis::cmd("HSET")

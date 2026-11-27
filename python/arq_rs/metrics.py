@@ -1,7 +1,9 @@
 """In-process counters with Dramatiq names, labels, and histogram buckets.
 
-Rust ``arq_*`` series are a separate export. This registry is the handler path.
-``queue_name`` drops one ``.DQ`` or ``.XQ`` suffix. The delayed gauge stays at 0.
+``arq_storage_inconsistent`` and ``arq_quarantine_total`` are recorded here when
+the child observes a halt or a quarantine move. The other ``arq_*`` names stay
+unimplemented. ``queue_name`` drops one ``.DQ`` or ``.XQ`` suffix. The delayed
+gauge stays at 0.
 """
 
 from __future__ import annotations
@@ -49,6 +51,9 @@ _NAMES = {
     "duration": "dramatiq_message_duration_milliseconds",
 }
 
+_ARQ_GAUGE: dict[str, float] = {}
+_ARQ_QUARANTINE: dict[tuple[str, str], float] = {}
+
 
 def q_name(queue_name: str) -> str:
     if queue_name.endswith(".DQ") or queue_name.endswith(".XQ"):
@@ -84,6 +89,8 @@ def reset() -> None:
     _STARTED.clear()
     _VALUES.clear()
     _OBSERVATIONS.clear()
+    _ARQ_GAUGE.clear()
+    _ARQ_QUARANTINE.clear()
 
 
 def setup(*, multiprocess: bool | None = None) -> None:
@@ -107,6 +114,29 @@ def _labels(queue: str, actor: str) -> tuple[str, str]:
 def _add(key: str, labels: tuple[str, str], amount: float) -> None:
     table = _VALUES[key]
     table[labels] = table.get(labels, 0.0) + amount
+
+
+def note_storage_inconsistent(queue_name: str) -> None:
+    setup()
+    with _LOCK:
+        _ARQ_GAUGE[q_name(queue_name)] = 1.0
+
+
+def note_quarantine(queue_name: str, reason: str) -> None:
+    setup()
+    key = (q_name(queue_name), reason)
+    with _LOCK:
+        _ARQ_QUARANTINE[key] = _ARQ_QUARANTINE.get(key, 0.0) + 1.0
+
+
+def arq_value(name: str, queue_name: str, reason: str = "") -> float:
+    setup()
+    queue = q_name(queue_name)
+    if name in {"arq_storage_inconsistent", "inconsistent"}:
+        return _ARQ_GAUGE.get(queue, 0.0)
+    if name in {"arq_quarantine_total", "quarantine"}:
+        return _ARQ_QUARANTINE.get((queue, reason), 0.0)
+    raise KeyError(name)
 
 
 def note_retry(queue: str, actor: str) -> None:
@@ -176,6 +206,12 @@ def render() -> str:
             lines.append(f'{public}{{queue_name="{labels[0]}",actor_name="{labels[1]}"}} {sample}')
         if key == "delayed" and not _VALUES[key]:
             lines.append(f"# {public} stays 0")
+    lines.append("# TYPE arq_storage_inconsistent gauge")
+    for queue_name, sample in sorted(_ARQ_GAUGE.items()):
+        lines.append(f'arq_storage_inconsistent{{queue_name="{queue_name}"}} {sample}')
+    lines.append("# TYPE arq_quarantine_total counter")
+    for (queue_name, reason), sample in sorted(_ARQ_QUARANTINE.items()):
+        lines.append(f'arq_quarantine_total{{queue_name="{queue_name}",reason="{reason}"}} {sample}')
     lines.append(f"# buckets {_LABELS[0]} {_LABELS[1]} " + ",".join(_bucket_text(bound) for bound in DURATION_BUCKETS))
     return "\n".join(lines) + "\n"
 

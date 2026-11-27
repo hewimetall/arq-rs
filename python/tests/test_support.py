@@ -22,7 +22,10 @@ from arq_rs.metrics import (
     DURATION_BUCKETS,
     finish_attempt,
     install_slot_identity,
+    arq_value,
+    note_quarantine,
     note_retry,
+    note_storage_inconsistent,
     q_name,
     reject,
     render,
@@ -67,6 +70,12 @@ def test_metric_names_buckets_and_delayed_gauge(tmp_path, monkeypatch):
     monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
     install_slot_identity()
     assert (tmp_path / "slot_3.pid").is_file()
+    note_storage_inconsistent("default.DQ")
+    note_quarantine("default", "missing_hash")
+    note_quarantine("default", "missing_hash")
+    assert arq_value("arq_storage_inconsistent", "default") == 1
+    assert arq_value("arq_quarantine_total", "default", "missing_hash") == 2
+    assert arq_value("quarantine", "default", "hash_type") == 0
     note_retry("default.DQ", "process_item")
     assert value("dramatiq_message_retries_total", "default", "process_item") == 1
     assert value("delayed", "default", "process_item") == 0
@@ -78,6 +87,10 @@ def test_metric_names_buckets_and_delayed_gauge(tmp_path, monkeypatch):
     assert "900000" in text
     assert "+Inf" in text
     assert "dramatiq_messages_total" in text
+    assert 'arq_storage_inconsistent{queue_name="default"} 1.0' in text
+    assert 'arq_quarantine_total{queue_name="default",reason="missing_hash"} 2.0' in text
+    with pytest.raises(KeyError):
+        arq_value("nope", "default")
     assert DURATION_BUCKETS[-2] == 900000
     with pytest.raises(KeyError):
         value("nope", "default", "process_item")

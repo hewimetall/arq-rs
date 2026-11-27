@@ -18,11 +18,11 @@ mod parent;
 pub use child::run_child;
 #[doc(hidden)]
 pub use delivery::{
-    fail_next_finish_transports, production_begin_finish_count, production_finish_terminal,
+    fail_next_finish_transports, production_arq_metric, production_begin_finish_count, production_finish_terminal,
+    production_halt_log_count,
 };
 pub use cli::{
-    execute, package_version, prepare, redis_endpoint_label, usage, version_line, Action,
-    ChildPlan, ParentPlan,
+    execute, package_version, prepare, redis_endpoint_label, usage, version_line, Action, ChildPlan, ParentPlan,
 };
 pub use parent::{run_parent, spec_from_plan};
 
